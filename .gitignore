@@ -1,0 +1,23 @@
+# Environment
+.env
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Node / Vue
+node_modules/
+dist/
+
+# Local tool config
+mise.local.toml
+
+# OS
+.DS_Store
+Thumbs.db

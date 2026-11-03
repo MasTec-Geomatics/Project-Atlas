@@ -1,0 +1,12 @@
+[tools]
+    bun = "latest"
+    node = "lts"
+    python = "3.14"
+    uv = "latest"
+
+[env]
+    UV_PYTHON_DOWNLOADS = "never"
+    UV_PYTHON_PREFERENCE = "only-system"
+
+[settings]
+    python.uv_venv_auto = "create|source"
