@@ -1,20 +1,44 @@
-# 0004. QGIS for Editing
+# 0004. QGIS for Spatial Editing
 
 **Status:** Accepted
-
 **Date:** 2026-11-02
+**Revised:** 2026-11-04
 
 ## Context
 
-The department needs to edit spatial data such as project boundaries. The company uses QGIS rather than Esri, for cost and licensing reasons.
+The Geomatics group requires tools to maintain spatial information, including project boundaries and GIS reference data.
+
+QGIS is already used within the department.
+
+Developing a complete GIS editing environment inside Project Atlas would duplicate established desktop GIS functionality.
+
+The spatial database will be hosted centrally and accessed by geographically distributed employees.
 
 ## Decision
 
-Department editors use QGIS desktop for geometry editing. Viewers use the web app in the browser.
+Use QGIS as the primary desktop tool for spatial editing, GIS analysis, and quality control.
+
+PostgreSQL/PostGIS will store spatial information, with QGIS connecting directly where permitted by network and security policies.
+
+Project Atlas will consume published spatial data through its API and appropriate geospatial services.
+
+The web frontend will focus initially on visualization, project selection, dataset discovery, and operational workflows.
+
+Spatial ingestion and automated transformations will be handled by Python workers.
 
 ## Consequences
 
-- No geometry editing tools need to be built in the web app at first.
-- The team already knows QGIS.
-- Editing requires QGIS on the editor's machine.
-- How QGIS connects to the database is not yet decided.
+- The department can use its existing GIS skills and software.
+- The web application does not initially require complex geometry editing functionality.
+- Spatial editing permissions must be enforced at the database level.
+- Remote database connectivity must be secured and tested.
+- Large geographic datasets may require optimized queries, spatial services, and caching.
+- Automated ingestion and manual editing workflows must not overwrite each other's changes without appropriate controls.
+
+## Future Considerations
+
+Browser-based editing may be introduced for limited workflows if required.
+
+Civil 3D and Trimble Business Center integration will be evaluated separately according to their supported data interfaces and actual departmental workflows.
+
+The exact QGIS connection, permission, and editing strategy will be finalized during implementation.
