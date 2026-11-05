@@ -414,6 +414,53 @@ The repository includes an `.env.example` file, but environment configuration an
 
 Full application startup instructions will be added when the database, API, and frontend are connected.
 
+### Local Database
+
+For development, PostgreSQL with PostGIS runs in its own Podman pod, defined as Kubernetes YAML in `deploy/local/`. Production is expected to use managed PostgreSQL (see ADR 0008).
+
+| File                                       | Purpose                                            |
+| ------------------------------------------ | -------------------------------------------------- |
+| `deploy/local/postgis.yaml`                | Database pod and its `PersistentVolumeClaim`       |
+| `deploy/local/postgis-secret.example.yaml` | Template for the database credentials `Secret`     |
+| `deploy/local/postgis-secret.yaml`         | Your local credentials (gitignored, not committed) |
+
+Run these commands from the repository root.
+
+Create your credentials file once, then set your own password in it:
+
+```sh
+cp deploy/local/postgis-secret.example.yaml deploy/local/postgis-secret.yaml
+```
+
+Start the database. The `Secret` must be loaded before the pod:
+
+```sh
+podman kube play deploy/local/postgis-secret.yaml
+podman kube play deploy/local/postgis.yaml
+```
+
+The database listens on `localhost:5432`.
+
+Stop the database. The data is kept:
+
+```sh
+podman kube down deploy/local/postgis.yaml
+```
+
+Remove the stored credentials:
+
+```sh
+podman kube down deploy/local/postgis-secret.yaml
+```
+
+Delete the database and all its data:
+
+```sh
+podman kube down --force deploy/local/postgis.yaml
+```
+
+Credentials are only applied when the database is first created. To change them later, delete the database with `--force` and start it again.
+
 ## Development Roadmap
 
 | Phase | Scope                                               | Status      |

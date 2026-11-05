@@ -10,3 +10,22 @@
 
 [settings]
     python.uv_venv_auto = "create|source"
+
+[tasks."db:up"]
+    description = "Start the local PostGIS database pod"
+    run = [
+        "podman kube play deploy/local/postgis-secret.yaml",
+        "podman kube play deploy/local/postgis.yaml",
+    ]
+
+[tasks."db:down"]
+    description = "Stop the local database pod (data is kept)"
+    run = "podman kube down deploy/local/postgis.yaml"
+
+[tasks."db:delete"]
+    description = "Delete the local database pod, its data, and its credentials"
+    confirm = "Delete the local database and all its data?"
+    run = [
+        "podman kube down --force deploy/local/postgis.yaml",
+        "podman kube down deploy/local/postgis-secret.yaml",
+    ]

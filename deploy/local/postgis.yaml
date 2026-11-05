@@ -1,0 +1,53 @@
+# Local development database: PostgreSQL + PostGIS in its own Podman pod.
+#
+# Requires the Secret in postgis-secret.yaml (copy postgis-secret.example.yaml).
+# See README.md, "Local Database".
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: atlas-db-data
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: atlas-db
+  labels:
+    app: atlas-db
+spec:
+  containers:
+    - name: postgis
+      image: docker.io/postgis/postgis:18-3.6
+      ports:
+        - containerPort: 5432
+          hostPort: 5432
+      env:
+        - name: POSTGRES_USER
+          valueFrom:
+            secretKeyRef:
+              name: atlas-db-credentials
+              key: POSTGRES_USER
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: atlas-db-credentials
+              key: POSTGRES_PASSWORD
+        - name: POSTGRES_DB
+          valueFrom:
+            secretKeyRef:
+              name: atlas-db-credentials
+              key: POSTGRES_DB
+      volumeMounts:
+        # PostgreSQL 18+ images keep data under /var/lib/postgresql/18/docker.
+        - name: data
+          mountPath: /var/lib/postgresql
+  volumes:
+    - name: data
+      persistentVolumeClaim:
+        claimName: atlas-db-data
