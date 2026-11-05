@@ -1,6 +1,7 @@
 # Environment
 .env
 !.env.example
+deploy/local/*secret.yaml
 
 # Python
 __pycache__/
