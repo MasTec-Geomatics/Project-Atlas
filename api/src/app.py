@@ -3,7 +3,7 @@ from fastapi import APIRouter, FastAPI
 from src.core.config import settings
 from src.core.logging import configure_logging
 
-configure_logging(settings.log_level)
+configure_logging(settings.log_level, settings.log_json)
 
 app = FastAPI(title="Project Atlas")
 
