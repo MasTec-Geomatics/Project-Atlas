@@ -123,19 +123,29 @@ The objective is to establish a traceable publication process and reduce rework 
 | ----------------- | ------------------------------------- | ------------------------------------------------ |
 | API               | Python / FastAPI                      | Application endpoints and business logic         |
 | Frontend          | Vue 3 / TypeScript                    | Dashboards, task management, and visualization   |
+| UI Components     | Vuetify 4                             | Forms, dialogs, layout, and navigation           |
+| Tables            | TanStack Table                        | Data tables                                      |
+| Server State      | TanStack Vue Query                    | API data fetching and caching                    |
+| API Client        | openapi-typescript / openapi-fetch    | Types generated from the API schema              |
+| Forms             | VeeValidate / Zod                     | Form state and validation                        |
+| Web Maps          | MapLibre GL JS                        | Project location maps                            |
+| Basemaps          | USGS National Map                     | Topo and imagery basemaps                        |
 | Database          | PostgreSQL / PostGIS                  | Operational and spatial data                     |
 | ORM / Database    | SQLAlchemy / GeoAlchemy2              | Database access and spatial models               |
 | Migrations        | Alembic                               | Version-controlled database changes              |
 | Validation        | Pydantic                              | API and application data validation              |
+| Logging           | structlog / Rich                      | Structured logs, readable tracebacks in dev      |
+| Error Tracking    | Sentry                                | Production error tracking                        |
 | Workers           | Python                                | Background processing and integrations           |
 | GIS Processing    | GDAL/OGR, PDAL, and related libraries | Geospatial processing as required                |
 | GIS Editing       | QGIS                                  | Spatial data editing and analysis                |
 | Point Clouds      | Potree                                | Browser-based point cloud visualization          |
-| Authentication    | Okta                                  | Corporate identity integration                   |
+| Authentication    | Clerk (temporary) → Okta              | Identity (see ADR 0012)                          |
 | CAD Documents     | Autodesk Docs                         | Access to relevant drawings and documents        |
 | Containers        | Podman                                | Local and containerized application environments |
 | Orchestration     | Kubernetes (planned)                  | Deployment orchestration when required           |
-| Development Tools | mise / uv / Bun                       | Runtime, dependency, and frontend tooling        |
+| Python Tooling    | ruff / mypy / pytest                  | Linting, formatting, type checking, tests        |
+| Development Tools | mise / uv / Bun / Vite+               | Runtime, dependency, and frontend tooling        |
 
 Components listed here include both existing project decisions and planned capabilities. Production infrastructure and some library selections remain subject to evaluation.
 
@@ -251,9 +261,7 @@ Components may be grouped into Pods where shared networking and lifecycle requir
 
 In Kubernetes, components requiring independent scaling or scheduling can be deployed in separate Pods.
 
-A reverse proxy or ingress layer can expose the frontend and API through a common browser origin when appropriate.
-
-**Shared Pod networking does not, by itself, eliminate browser CORS restrictions.** Browser origin behavior depends on the URLs exposed to the client.
+The browser only talks to one origin. A reverse proxy (or Kubernetes ingress) routes `/api/*` to the API and all other paths to the frontend, so the API does not use CORS. In development, the Vite dev server forwards `/api` to the API. See ADR 0013.
 
 Production cloud hosting, network architecture, persistent storage, and orchestration details remain under evaluation.
 
@@ -463,16 +471,17 @@ Credentials are only applied when the database is first created. To change them 
 
 ## Development Roadmap
 
-| Phase | Scope                                               | Status      |
-| ----- | --------------------------------------------------- | ----------- |
-| 1     | Repository setup and initial architecture           | In progress |
-| 2     | Database foundation, identity, and core application | Planned     |
-| 3     | Project records and task management                 | Planned     |
-| 4     | Background workers and GIS ingestion                | Planned     |
-| 5     | Project maps and spatial visualization              | Planned     |
-| 6     | Deliverable review and release workflows            | Planned     |
-| 7     | Procore and reporting integrations                  | Discovery   |
-| 8     | Production deployment and operational hardening     | Planned     |
+| Phase | Scope                                                                 | Status      |
+| ----- | --------------------------------------------------------------------- | ----------- |
+| 1     | Repository setup and initial architecture                             | Done        |
+| 2     | Foundation: API core conventions, tooling, migrations, web foundation | In progress |
+| 3     | Team demo: projects, tasks, dashboard, map, temporary auth, hosted    | Planned     |
+| 4     | Okta identity and QGIS database access                                | Planned     |
+| 5     | Background workers and GIS ingestion                                  | Planned     |
+| 6     | Datasets and point clouds                                             | Planned     |
+| 7     | Deliverable review and release workflows                              | Planned     |
+| 8     | Procore and reporting integrations                                    | Discovery   |
+| 9     | Production deployment and operational hardening                       | Planned     |
 
 The roadmap is directional rather than a fixed implementation schedule. Feature priorities may change as the Geomatics group's requirements and enterprise integration capabilities become clearer.
 
