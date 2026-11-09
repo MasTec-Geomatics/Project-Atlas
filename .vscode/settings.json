@@ -1,0 +1,21 @@
+{
+    // ============================================================
+    // GIT & VERSION CONTROL / JUJUTSU
+    // ============================================================
+    "git.enabled": false,
+    "cSpell.words": [
+        "basemap",
+        "Basemaps",
+        "EPSG",
+        "NOAA",
+        "postgis",
+        "Procore",
+        "Regrid",
+        "SRID",
+        "structlog",
+        "timestamptz",
+        "USGS",
+        "Uvicorn",
+        "Vuetify"
+    ],
+}
