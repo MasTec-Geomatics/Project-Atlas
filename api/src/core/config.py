@@ -12,6 +12,7 @@ class Settings(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     database_url: PostgresDsn = Field(alias="DATABASE_URL")
+    reference_database_url: PostgresDsn = Field(alias="REFERENCE_DATABASE_URL")
     api_host: str = Field(alias="API_HOST")
     api_port: int = Field(alias="API_PORT")
     log_level: str = Field(alias="LOG_LEVEL")

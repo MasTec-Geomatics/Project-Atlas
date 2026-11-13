@@ -5,7 +5,7 @@
 
 ## Context
 
-Reference data must be read-only for users and editable only by a small group of Geomatics maintainers. Users work remotely on locked-down company laptops that cannot install VPN clients. Outbound port `5432` is allowed on those laptops.
+Reference data must be read-only for users and editable only by a small group of Geomatics maintainers. Users work remotely on locked-down company laptops that cannot install VPN clients. Outbound port `25060` is allowed on those laptops.
 
 The database may later be opened to the whole company.
 
@@ -28,7 +28,7 @@ Roles belong to the whole PostgreSQL server, so they are created once at server 
 
 ### QGIS
 
-QGIS connects directly to the `reference` database on port `5432`, encrypted with TLS (`SSL mode = verify-full`). There is no service layer between QGIS and the database.
+QGIS connects directly to the `reference` database on port `25060`, encrypted with TLS (`SSL mode = verify-full`). There is no service layer between QGIS and the database.
 
 ## Consequences
 

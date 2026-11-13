@@ -37,8 +37,7 @@ Create a separate database named `reference` on the same PostgreSQL server as `a
 
 - Bulk loads cannot affect Atlas data.
 - QGIS users are granted access to `reference` only and never see `atlas`.
-- Each database is backed up and restored on its own.
-- One server to run.
+- Managed cluster backups cover both databases together. A single database can be backed up on its own with `pg_dump`.- One server to run.
 - A single SQL query cannot join tables across the two databases. Atlas code reads reference data through its own connection.
 - Atlas has two database connections: `DATABASE_URL` and `REFERENCE_DATABASE_URL`.
 - Distances and areas are not meaningful in degrees. Measurements use the PostGIS `geography` type or reproject within the query.
