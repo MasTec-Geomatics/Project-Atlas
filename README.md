@@ -490,13 +490,11 @@ Credentials are only applied when the database is first created. To change them 
 The `reference` database runs on the same local server. Create its roles and database once, after the pod is running:
 
 ```sh
-podman exec -i atlas-db-postgis psql -U atlas -d postgres < deploy/local/reference-setup.sql
+mise run db:reference
 ```
 
-Then apply its migrations from `api/`:
-
 ```sh
-uv run alembic -n reference upgrade head
+mise run db:migrate:reference
 ```
 
 ## Development Roadmap

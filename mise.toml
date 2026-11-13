@@ -29,3 +29,17 @@
         "podman kube down --force deploy/local/postgis.yaml",
         "podman kube down deploy/local/postgis-secret.yaml",
     ]
+
+[tasks."db:reference"]
+    description = "Create the reference roles and database (safe to rerun)"
+    run = "podman exec -i postgres-postgis psql -U atlas -d postgres < deploy/local/reference-setup.sql"
+
+[tasks."db:migrate"]
+    description = "Apply atlas database migrations"
+    dir = "api"
+    run = "uv run alembic upgrade head"
+
+[tasks."db:migrate:reference"]
+    description = "Apply reference database migrations"
+    dir = "api"
+    run = "uv run alembic -n reference upgrade head"
