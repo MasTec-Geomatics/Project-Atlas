@@ -230,17 +230,31 @@ PostgreSQL/PostGIS serves as the primary operational and geospatial data platfor
 
 Logical schema boundaries may include:
 
+Atlas uses two databases on the same PostgreSQL server:
+
+| Database    | Holds                                                        |
+| ----------- | ------------------------------------------------------------ |
+| `atlas`     | Projects, tasks, assignments, workflow, and project GIS data |
+| `reference` | Public GIS layers, read-only for users (ADR 0017)            |
+
+Proposed schemas in `atlas`:
+
 | Schema       | Responsibility                                      |
 | ------------ | --------------------------------------------------- |
 | `operations` | Projects, tasks, assignments, and workflow records  |
 | `gis`        | Project-specific spatial information                |
-| `reference`  | Standardized external GIS datasets                  |
 | `catalog`    | Dataset sources, metadata, provenance, and licenses |
 | `staging`    | Temporary ingestion and validation data             |
 
-These are proposed logical boundaries; the final database model has not yet been established.
+These are proposed logical boundaries; the final `atlas` model has not yet been established.
 
-Large source datasets, imagery, LiDAR, and working documents may use separate storage infrastructure.
+### Reference Database
+
+The `reference` database holds public GIS layers for the Risk Management and Estimating team, starting with Texas: wetlands, floodplain, cultural sites, critical habitat, wells and pipelines, protected lands, parcels, and soils. The table design is in `docs/reference-db.dbml`.
+
+- QGIS users connect directly over TLS with read-only logins (ADR 0019).
+- Maintainers load and refresh layers. Before MVP, loads run from a maintainer's machine. After MVP, they run from an Atlas admin page (ADR 0018).
+- Elevation rasters are stored in AWS S3, not in the database (ADR 0017).
 
 ## Containers and Deployment
 
@@ -363,7 +377,8 @@ project-atlas/
 │   ├── main.py
 │   ├── pyproject.toml
 │   ├── alembic.ini
-│   ├── migrations/
+│   ├── migrations/             # atlas database
+│   ├── migrations_reference/   # reference database
 │   ├── src/
 │   │   ├── app.py
 │   │   ├── core/
@@ -371,7 +386,8 @@ project-atlas/
 │   │   ├── projects/
 │   │   ├── datasets/
 │   │   ├── survey_points/
-│   │   └── standards/
+│   │   ├── standards/
+│   │   └── reference/          # reference models, loaders, checks
 │   └── tests/                  # Planned
 └── web/
     └── src/
@@ -468,6 +484,20 @@ podman kube down --force deploy/local/postgis.yaml
 ```
 
 Credentials are only applied when the database is first created. To change them later, delete the database with `--force` and start it again.
+
+#### Reference Database
+
+The `reference` database runs on the same local server. Create its roles and database once, after the pod is running:
+
+```sh
+podman exec -i atlas-db-postgis psql -U atlas -d postgres < deploy/local/reference-setup.sql
+```
+
+Then apply its migrations from `api/`:
+
+```sh
+uv run alembic -n reference upgrade head
+```
 
 ## Development Roadmap
 
