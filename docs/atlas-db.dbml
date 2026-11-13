@@ -1,0 +1,334 @@
+// atlas database
+// PostgreSQL + PostGIS. Conventions: ADR 0015.
+// Spatial indexes are GiST; DBML can't express that type, so they're marked with a note.
+
+Project atlas {
+  database_type: 'PostgreSQL'
+  Note: '''
+  Geomatics working data. Public GIS layers live in the separate reference database (ADR 0017).
+  Every table is audited: each insert, update, and delete writes a row to audit.record_changes.
+  '''
+}
+
+// ---------------------------------------------------------------
+// operations: users and roles
+// ---------------------------------------------------------------
+
+Table operations.users {
+  id bigint [pk, increment]
+  okta_id text [unique, not null, note: 'Identity provider user ID, for SSO login only. Clerk first, then Okta (ADR 0012)']
+  name text [not null]
+  email text [unique, not null]
+  created_at timestamptz [not null, default: `now()`]
+  updated_at timestamptz [not null, default: `now()`]
+
+  Note: 'Roles and permissions come from user_roles, not the identity provider.'
+}
+
+Table operations.roles {
+  id bigint [pk, increment]
+  name text [unique, not null, note: 'e.g. GE, GE Manager, reviewer, publisher, maintainer']
+  description text
+  created_at timestamptz [not null, default: `now()`]
+  updated_at timestamptz [not null, default: `now()`]
+}
+
+Table operations.user_roles {
+  id bigint [pk, increment]
+  user_id bigint [not null, ref: > operations.users.id]
+  role_id bigint [not null, ref: > operations.roles.id]
+  granted_by bigint [ref: > operations.users.id]
+  created_at timestamptz [not null, default: `now()`]
+
+  indexes {
+    (user_id, role_id) [unique]
+  }
+}
+
+// ---------------------------------------------------------------
+// operations: projects
+// ---------------------------------------------------------------
+
+Table operations.projects {
+  id bigint [pk, increment]
+  procore_project_id text [unique, note: 'Link to the Procore project (ADR 0009)']
+  project_number text [unique, not null]
+  name text [not null, note: 'OPEN: owned here or synced from Procore']
+  client text [note: 'OPEN: owned here or synced from Procore']
+  status text [not null, note: 'Geomatics production status. check: OPEN, values not yet listed']
+  crs_profile_id bigint [not null, ref: > standards.crs_profiles.id]
+  boundary "geometry(MultiPolygon, 4326)"
+  created_at timestamptz [not null, default: `now()`]
+  updated_at timestamptz [not null, default: `now()`]
+
+  indexes {
+    boundary [note: 'GiST']
+  }
+}
+
+Table operations.project_links {
+  id bigint [pk, increment]
+  project_id bigint [not null, ref: > operations.projects.id]
+  label text [not null]
+  link_type text [not null, note: "check: 'docs_drawing' | 'file' | 'other'"]
+  url text [not null]
+  created_at timestamptz [not null, default: `now()`]
+  updated_at timestamptz [not null, default: `now()`]
+}
+
+// ---------------------------------------------------------------
+// operations: tasks
+// ---------------------------------------------------------------
+
+Table operations.tasks {
+  id bigint [pk, increment]
+  project_id bigint [not null, ref: > operations.projects.id]
+  title text [not null]
+  description text
+  priority text [not null, note: 'check: OPEN, values not yet listed']
+  status text [not null, note: 'check: OPEN, values not yet listed']
+  due_date date
+  assigned_to bigint [ref: > operations.users.id, note: 'NULL = in the shared queue']
+  assigned_by bigint [ref: > operations.users.id, note: 'NULL when claimed from the queue']
+  requires_review boolean [not null, default: false]
+  created_at timestamptz [not null, default: `now()`]
+  updated_at timestamptz [not null, default: `now()`]
+
+  Note: 'Claiming is one atomic UPDATE ... WHERE assigned_to IS NULL.'
+}
+
+Table operations.task_dependencies {
+  id bigint [pk, increment]
+  predecessor_task_id bigint [not null, ref: > operations.tasks.id, note: 'Must finish first']
+  successor_task_id bigint [not null, ref: > operations.tasks.id, note: 'Waits on the predecessor']
+  created_at timestamptz [not null, default: `now()`]
+
+  indexes {
+    (predecessor_task_id, successor_task_id) [unique]
+  }
+
+  Note: 'check: predecessor_task_id <> successor_task_id. Basis for Gantt and critical path.'
+}
+
+Table operations.task_events {
+  id bigint [pk, increment]
+  task_id bigint [not null, ref: > operations.tasks.id]
+  event_type text [not null, note: "check: 'created' | 'assigned' | 'claimed' | 'status_changed'"]
+  from_status text
+  to_status text
+  user_id bigint [not null, ref: > operations.users.id]
+  created_at timestamptz [not null, default: `now()`]
+
+  Note: 'Automatic task history shown in the app. Append-only.'
+}
+
+Table operations.task_updates {
+  id bigint [pk, increment]
+  task_id bigint [not null, ref: > operations.tasks.id]
+  author_id bigint [not null, ref: > operations.users.id]
+  body text [not null, note: 'What happened, what is next']
+  is_blocker boolean [not null, default: false, note: 'Blocked and needs assistance']
+  created_at timestamptz [not null, default: `now()`]
+  updated_at timestamptz [not null, default: `now()`]
+
+  indexes {
+    (task_id, created_at)
+  }
+
+  Note: 'Written progress updates. Source for the future weekly AI summary.'
+}
+
+// ---------------------------------------------------------------
+// operations: deliverables (ADR 0010)
+// ---------------------------------------------------------------
+
+Table operations.deliverables {
+  id bigint [pk, increment]
+  project_id bigint [not null, ref: > operations.projects.id]
+  deliverable_type text [not null]
+  name text [not null]
+  created_at timestamptz [not null, default: `now()`]
+  updated_at timestamptz [not null, default: `now()`]
+}
+
+Table operations.deliverable_revisions {
+  id bigint [pk, increment]
+  deliverable_id bigint [not null, ref: > operations.deliverables.id]
+  revision text [not null]
+  status text [not null, note: "check: 'wip' | 'internal_review' | 'approved' | 'rejected' | 'published' | 'superseded' | 'archived'"]
+  storage_system text [not null, note: "check: values set when systems are chosen, e.g. 's3', 'spaces', 'local'"]
+  storage_key text [not null, note: 'Path within the storage system. Immutable snapshot once approved']
+  checksum text [note: 'Set when approved']
+  supersedes_revision_id bigint [ref: > operations.deliverable_revisions.id, note: 'The revision this one replaces, e.g. a rejected one']
+  created_at timestamptz [not null, default: `now()`]
+  updated_at timestamptz [not null, default: `now()`]
+
+  indexes {
+    (deliverable_id, revision) [unique]
+  }
+}
+
+Table operations.deliverable_reviews {
+  id bigint [pk, increment]
+  revision_id bigint [not null, ref: > operations.deliverable_revisions.id]
+  reviewer_id bigint [not null, ref: > operations.users.id]
+  decision text [not null, note: "check: 'approved' | 'rejected'"]
+  notes text [note: 'Required when rejected: what needs to change']
+  reviewed_at timestamptz [not null, default: `now()`]
+
+  Note: 'One row per review decision. Append-only.'
+}
+
+Table operations.publications {
+  id bigint [pk, increment]
+  revision_id bigint [not null, ref: > operations.deliverable_revisions.id]
+  destination_system text [not null, note: "check: 'procore'"]
+  destination_document_id text [note: 'ID returned by the destination']
+  published_by text [not null, note: 'User or service identity']
+  result text [not null, note: "check: 'success' | 'failed'"]
+  error_details text
+  published_at timestamptz [not null, default: `now()`]
+
+  Note: 'One row per publish attempt. Append-only. A failed row does not make the revision published.'
+}
+
+// ---------------------------------------------------------------
+// gis: project-specific spatial data
+// ---------------------------------------------------------------
+
+Table gis.datasets {
+  id bigint [pk, increment]
+  project_id bigint [not null, ref: > operations.projects.id]
+  type text [not null, note: "check: 'imagery' | 'lidar'"]
+  name text [not null]
+  captured_on date
+  storage_system text [not null, note: "check: values set when systems are chosen, e.g. 's3', 'spaces', 'local'"]
+  storage_key text [not null, note: 'Path within the storage system']
+  footprint "geometry(MultiPolygon, 4326)"
+  crs_profile_id bigint [not null, ref: > standards.crs_profiles.id]
+  created_at timestamptz [not null, default: `now()`]
+  updated_at timestamptz [not null, default: `now()`]
+
+  indexes {
+    footprint [note: 'GiST']
+  }
+}
+
+Table gis.survey_points {
+  id bigint [pk, increment]
+  project_id bigint [not null, ref: > operations.projects.id]
+  point_number text [not null]
+  northing numeric [not null, note: "In the project's crs_profile"]
+  easting numeric [not null]
+  elevation numeric
+  raw_code text [note: 'Code as collected in the field']
+  point_code_id bigint [ref: > standards.point_codes.id, note: 'NULL if unmatched']
+  geom "geometry(Point, 4326)" [note: 'Converted from northing/easting for maps']
+  source_file text
+  created_at timestamptz [not null, default: `now()`]
+  updated_at timestamptz [not null, default: `now()`]
+
+  indexes {
+    geom [note: 'GiST']
+  }
+}
+
+// ---------------------------------------------------------------
+// standards: department standards
+// ---------------------------------------------------------------
+
+Table standards.crs_profiles {
+  id bigint [pk, increment]
+  name text [unique, not null, note: 'e.g. "SC State Plane 2011, Intl Ft, NAVD88"']
+  horizontal_epsg integer [not null]
+  vertical_epsg integer
+  geoid_model text
+  horizontal_units text [not null]
+  vertical_units text [not null]
+  tbc_zone_name text
+  civil3d_cs_code text
+  created_at timestamptz [not null, default: `now()`]
+  updated_at timestamptz [not null, default: `now()`]
+
+  Note: 'Approved coordinate system setups.'
+}
+
+Table standards.point_codes {
+  id bigint [pk, increment]
+  code text [unique, not null]
+  description text [not null]
+  category text
+  created_at timestamptz [not null, default: `now()`]
+  updated_at timestamptz [not null, default: `now()`]
+}
+
+// ---------------------------------------------------------------
+// audit: every change to every table
+// ---------------------------------------------------------------
+
+Table audit.record_changes {
+  id bigint [pk, increment]
+  occurred_at timestamptz [not null, default: `now()`]
+  table_schema text [not null, note: 'e.g. operations']
+  table_name text [not null, note: 'e.g. tasks']
+  row_id bigint [not null, note: 'id of the changed row']
+  action text [not null, note: "check: 'insert' | 'update' | 'delete'"]
+  app_user_id bigint [note: 'Atlas user who made the change through the app. NULL for direct database edits']
+  db_user text [not null, note: 'PostgreSQL login that made the change, e.g. a QGIS user']
+  request_id text [note: 'X-Request-ID from the API (ADR 0014). NULL outside the app']
+  old_values jsonb [note: 'Row before the change. NULL on insert']
+  new_values jsonb [note: 'Row after the change. NULL on delete']
+
+  indexes {
+    (table_schema, table_name, row_id)
+    occurred_at
+  }
+
+  Note: '''
+  Append-only. Nobody gets UPDATE or DELETE on this table.
+  No foreign key to users, so the log survives if a user is removed.
+  '''
+}
+
+// ---------------------------------------------------------------
+// Groups (dbdiagram.io display)
+// ---------------------------------------------------------------
+
+TableGroup users_and_roles {
+  operations.users
+  operations.roles
+  operations.user_roles
+}
+
+TableGroup projects {
+  operations.projects
+  operations.project_links
+}
+
+TableGroup tasks {
+  operations.tasks
+  operations.task_dependencies
+  operations.task_events
+  operations.task_updates
+}
+
+TableGroup deliverables {
+  operations.deliverables
+  operations.deliverable_revisions
+  operations.deliverable_reviews
+  operations.publications
+}
+
+TableGroup gis {
+  gis.datasets
+  gis.survey_points
+}
+
+TableGroup standards {
+  standards.crs_profiles
+  standards.point_codes
+}
+
+TableGroup audit {
+  audit.record_changes
+}

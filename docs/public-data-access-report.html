@@ -1,0 +1,488 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Reference GIS Database — Data Availability &amp; Design Report (Texas)</title>
+<style>
+  @page { size: Letter; margin: 0.7in 0.65in; }
+  :root {
+    --ink: #1d2733;
+    --muted: #5b6878;
+    --line: #d5dce4;
+    --accent: #1f5f8b;
+    --accent-soft: #e8f1f8;
+    --warn: #8a3b12;
+    --warn-soft: #fbefe7;
+    --ok: #1d6b3a;
+    --ok-soft: #e7f4ec;
+    --ref: #8a6d0b;
+    --ref-soft: #fbf4dc;
+    --code-bg: #f4f6f8;
+  }
+  * { box-sizing: border-box; }
+  body {
+    font-family: "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+    color: var(--ink);
+    font-size: 10.5pt;
+    line-height: 1.5;
+    max-width: 8.5in;
+    margin: 0 auto;
+    padding: 0.4in 0.3in;
+  }
+  header { border-bottom: 3px solid var(--accent); padding-bottom: 12px; margin-bottom: 22px; }
+  header h1 { margin: 0; font-size: 20pt; color: var(--accent); }
+  header .sub { color: var(--muted); margin-top: 4px; }
+  header .meta { margin-top: 8px; font-size: 9pt; color: var(--muted); }
+  h2 {
+    font-size: 13.5pt; color: var(--accent); border-bottom: 1px solid var(--line);
+    padding-bottom: 4px; margin-top: 30px; page-break-after: avoid;
+  }
+  h3 { font-size: 11pt; margin: 18px 0 6px; page-break-after: avoid; }
+  p { margin: 6px 0 10px; }
+  table { width: 100%; border-collapse: collapse; margin: 10px 0 16px; font-size: 9.5pt; page-break-inside: auto; }
+  tr { page-break-inside: avoid; }
+  th { background: var(--accent); color: #fff; text-align: left; padding: 6px 8px; font-weight: 600; }
+  td { padding: 6px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  tr:nth-child(even) td { background: #fafbfc; }
+  code, pre { font-family: "Cascadia Code", Consolas, "Courier New", monospace; }
+  code { background: var(--code-bg); padding: 1px 4px; border-radius: 3px; font-size: 9pt; }
+  pre {
+    background: var(--code-bg); border: 1px solid var(--line); border-left: 4px solid var(--accent);
+    padding: 10px 12px; font-size: 8.8pt; line-height: 1.45; overflow-x: auto;
+    white-space: pre-wrap; page-break-inside: avoid;
+  }
+  .callout {
+    border-left: 4px solid var(--accent); background: var(--accent-soft);
+    padding: 10px 14px; margin: 12px 0; page-break-inside: avoid;
+  }
+  .callout.warn { border-color: var(--warn); background: var(--warn-soft); }
+  .callout.ref { border-color: var(--ref); background: var(--ref-soft); }
+  .tag { display: inline-block; font-size: 8pt; padding: 1px 6px; border-radius: 10px; font-weight: 600; }
+  .tag.ok { background: var(--ok-soft); color: var(--ok); }
+  .tag.no { background: var(--warn-soft); color: var(--warn); }
+  .tag.ref { background: var(--ref-soft); color: var(--ref); }
+
+  /* Flow diagram */
+  .flow { display: flex; align-items: stretch; justify-content: space-between; gap: 6px; margin: 14px 0 18px; page-break-inside: avoid; }
+  .flow .box { flex: 1; border: 2px solid var(--accent); border-radius: 6px; padding: 8px; text-align: center; font-size: 8.8pt; background: #fff; }
+  .flow .box b { display: block; color: var(--accent); font-size: 9.5pt; margin-bottom: 2px; }
+  .flow .arrow { align-self: center; color: var(--accent); font-size: 16pt; font-weight: bold; }
+
+  /* Schema cards */
+  .schemas { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin: 12px 0 18px; }
+  .schema { border: 1px solid var(--line); border-radius: 6px; overflow: hidden; page-break-inside: avoid; background: #fff; }
+  .schema .hd { background: var(--accent); color: #fff; padding: 5px 9px; font-weight: 600; font-size: 9.5pt; }
+  .schema ul { list-style: none; margin: 0; padding: 6px 9px 8px; font-size: 9pt; }
+  .schema li { padding: 2px 0; border-bottom: 1px dotted var(--line); }
+  .schema li:last-child { border-bottom: none; }
+  .schema li code { background: none; padding: 0; }
+  .schema.s3 .hd { background: #6b4e9b; }
+  .schema.sys .hd { background: #4a5a6a; }
+
+  .diagram { margin: 12px 0 8px; page-break-inside: avoid; }
+  .diagram svg { width: 100%; height: auto; display: block; }
+  .small { font-size: 8.8pt; color: var(--muted); }
+  footer { margin-top: 30px; padding-top: 8px; border-top: 1px solid var(--line); font-size: 8.5pt; color: var(--muted); }
+  .pb { page-break-before: always; }
+  @media print { body { max-width: none; padding: 0; } h2 { margin-top: 22px; } }
+  a { color: var(--accent); text-decoration: none; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Reference GIS Database</h1>
+  <div class="sub">Data Availability &amp; Design Report — Phase 1: Texas</div>
+  <div class="meta">Prepared by: Geomatics · Date: November 13, 2026 · Audience: REPO (Business Development &amp; Estimating)</div>
+</header>
+
+<h2>1. Purpose</h2>
+<p>
+  REPO needs project-risk data for sites under estimate, even when the owner or client has not provided it.
+  This report lists the data REPO requested, which of it is publicly available at no cost, how it will be stored
+  and kept current, what is not available, and how team members will view it in QGIS.
+</p>
+<p>
+  The data lives in the <code>reference</code> database: public GIS layers gathered in one place and read-only for users.
+  Geomatics maintains it.
+</p>
+
+<div class="flow">
+  <div class="box"><b>Public Sources</b>Federal, Texas &amp; open data</div>
+  <div class="arrow">→</div>
+  <div class="box"><b>Loads</b>Started by Geomatics maintainers</div>
+  <div class="arrow">→</div>
+  <div class="box"><b>PostGIS Database</b><code>reference</code> — vector layers</div>
+  <div class="arrow">→</div>
+  <div class="box"><b>QGIS</b>Read-only for REPO users</div>
+</div>
+<div class="flow" style="margin-top:-8px">
+  <div class="box" style="visibility:hidden"></div>
+  <div class="arrow" style="visibility:hidden">→</div>
+  <div class="box" style="border-color:#6b4e9b"><b style="color:#6b4e9b">AWS S3</b>Elevation rasters (DEMs)</div>
+  <div class="arrow" style="color:#6b4e9b">→</div>
+  <div class="box" style="border-color:#6b4e9b"><b style="color:#6b4e9b">Reference Table</b>Links to S3 files</div>
+  <div class="arrow" style="color:#6b4e9b">→</div>
+  <div class="box" style="border-color:#6b4e9b"><b style="color:#6b4e9b">QGIS</b>Streams rasters from S3</div>
+</div>
+
+<h2>2. Requested Data</h2>
+<table>
+  <tr><th style="width:40%">Requested Item</th><th>Status</th></tr>
+  <tr><td>Topographic data</td><td><span class="tag ok">Available</span></td></tr>
+  <tr><td>Wetlands (state &amp; federal)</td><td><span class="tag ok">Available</span> Federal only; no separate Texas statewide layer</td></tr>
+  <tr><td>Ponds, streams, channels, ditches (blue-line)</td><td><span class="tag ok">Available</span></td></tr>
+  <tr><td>Tile drain</td><td><span class="tag no">Not available</span></td></tr>
+  <tr><td>Floodplain (state &amp; federal)</td><td><span class="tag ok">Available</span></td></tr>
+  <tr><td>Cultural / historical (cemeteries, protected properties, archaeological sites)</td><td><span class="tag ok">Available</span> except archaeological sites</td></tr>
+  <tr><td>Threatened &amp; endangered species</td><td><span class="tag ok">Available</span> Federal critical habitat only</td></tr>
+  <tr><td>Utility infrastructure — electric transmission lines</td><td><span class="tag ref">Available as reference</span> Archived federal data (frozen) plus OpenStreetMap; see Section 3.4</td></tr>
+  <tr><td>Utility infrastructure — culverts, gas distribution, water, sanitary, storm</td><td><span class="tag no">Not available</span></td></tr>
+  <tr><td>Pipelines &amp; wells</td><td><span class="tag ok">Available</span> Oil/gas (state) and water wells; not federal pipelines</td></tr>
+  <tr><td>Public easements, protected lands, rights-of-way</td><td><span class="tag ok">Available</span> except TxDOT right-of-way</td></tr>
+  <tr><td>Parcel boundaries</td><td><span class="tag ok">Available</span></td></tr>
+  <tr><td>USDA soils</td><td><span class="tag ok">Available</span></td></tr>
+</table>
+
+<h2>3. Publicly Available Data</h2>
+
+<h3>3.1 Sources</h3>
+<table>
+  <tr><th style="width:22%">Layer</th><th style="width:28%">Source</th><th style="width:22%">Download</th><th>Notes</th></tr>
+  <tr><td>Wetlands</td><td><a href="https://www.fws.gov/program/national-wetlands-inventory/download-state-wetlands-data">USFWS National Wetlands Inventory</a></td><td>GeoPackage (Texas)</td><td>Screening only; not a jurisdictional delineation</td></tr>
+  <tr><td>Streams &amp; waterbodies</td><td><a href="https://www.usgs.gov/3d-hydrography-program/access-3dhp-data-products">USGS 3D Hydrography Program</a></td><td>National file, clipped to Texas</td><td>Replaces the retired National Hydrography Dataset</td></tr>
+  <tr><td>State stream segments</td><td><a href="https://www.tceq.texas.gov/waterquality/tmdl/hydromaps.html">TCEQ</a></td><td>Shapefile</td><td>State regulatory water-quality segments, incl. impaired waters</td></tr>
+  <tr><td>Floodplain — federal</td><td><a href="https://msc.fema.gov/portal/resources/productsandtools">FEMA National Flood Hazard Layer</a></td><td>State extract</td><td>Regulatory flood zones</td></tr>
+  <tr><td>Floodplain — state</td><td><a href="https://www.twdb.texas.gov/flood/science/ble.asp">TWDB Base Level Engineering</a></td><td>Per watershed (HUC-8)</td><td>Statewide coverage; fills gaps in FEMA maps</td></tr>
+  <tr><td>National Register</td><td><a href="https://home.nps.gov/subjects/nationalregister/data-downloads.htm">National Park Service</a></td><td>File geodatabase</td><td>Public (non-restricted) listings</td></tr>
+  <tr><td>Cemeteries &amp; historical markers</td><td><a href="https://atlas.thc.texas.gov/Data/GISData">Texas Historical Commission Atlas</a></td><td>GIS downloads</td><td>Includes cemeteries with unknown exact location</td></tr>
+  <tr><td>Critical habitat</td><td><a href="https://ecos.fws.gov/ecp/report/table/critical-habitat.html">USFWS ECOS</a></td><td>National shapefile</td><td>Only species with designated critical habitat</td></tr>
+  <tr><td>Soils</td><td><a href="https://www.nrcs.usda.gov/node/1619">USDA NRCS gSSURGO</a></td><td>File geodatabase (Texas)</td><td>Map unit polygons + attribute tables</td></tr>
+  <tr><td>Topography</td><td><a href="https://catalog.data.gov/dataset/1-meter-digital-elevation-models-dems-usgs-national-map-3dep-downloadable-data-collection">USGS 3DEP 1-meter DEM</a></td><td>Raster tiles</td><td>Stored in S3 (see Section 5)</td></tr>
+  <tr><td>Oil/gas wells &amp; pipelines</td><td><a href="https://www.rrc.texas.gov/resource-center/research/data-sets-available-for-download/">Railroad Commission of Texas</a></td><td>Shapefiles by county</td><td>Published in NAD27; reprojected on load</td></tr>
+  <tr><td>Water wells</td><td><a href="https://www.twdb.texas.gov/mapping/gisdata.asp">TWDB Groundwater Database</a></td><td>Shapefile</td><td>Statewide well locations</td></tr>
+  <tr><td>Protected lands &amp; easements</td><td><a href="https://www.usgs.gov/programs/gap-analysis-project/science/pad-us-data-download">USGS PAD-US 4.1</a></td><td>GeoPackage (Texas)</td><td>Federal, state, local, and conservation easements</td></tr>
+  <tr><td>Parcels</td><td><a href="https://www.geographic.texas.gov/stratmap/land-parcels.html">TxGIO StratMap Land Parcels</a></td><td>Statewide</td><td>From county appraisal districts; attributes vary by county</td></tr>
+  <tr><td>Electric transmission lines — federal (archived)</td><td><a href="https://www.datalumos.org/datalumos/project/240591/version/V1/view">HIFLD Open Transmission Lines, archived in DataLumos</a></td><td>Shapefile or GeoJSON (national), clipped to Texas</td><td>Frozen copy; data dated February 19, 2025. Lines from 69 kV to 765 kV</td></tr>
+  <tr><td>Electric transmission lines — open data</td><td><a href="https://download.geofabrik.de/north-america/us.html">OpenStreetMap, Texas extract from Geofabrik</a></td><td><code>.osm.pbf</code> (Texas), power lines filtered on load</td><td>Volunteer-maintained; updated daily. © OpenStreetMap contributors, ODbL license</td></tr>
+</table>
+
+<h3>3.2 Database Tables</h3>
+<p>All coordinates are stored in WGS84 (<code>EPSG:4326</code>). Tables are grouped by schema.</p>
+
+<div class="schemas">
+  <div class="schema">
+    <div class="hd">hydro</div>
+    <ul>
+      <li><code>wetlands</code></li>
+      <li><code>flowlines</code></li>
+      <li><code>waterbodies</code></li>
+      <li><code>stream_segments</code></li>
+      <li><code>flood_fema</code></li>
+      <li><code>flood_ble</code></li>
+    </ul>
+  </div>
+  <div class="schema">
+    <div class="hd">cultural</div>
+    <ul>
+      <li><code>nrhp</code></li>
+      <li><code>cemeteries</code></li>
+      <li><code>markers</code></li>
+    </ul>
+  </div>
+  <div class="schema">
+    <div class="hd">environment</div>
+    <ul>
+      <li><code>critical_habitat</code></li>
+    </ul>
+  </div>
+  <div class="schema">
+    <div class="hd">energy</div>
+    <ul>
+      <li><code>oilgas_wells</code></li>
+      <li><code>pipelines</code></li>
+      <li><code>transmission_lines_hifld</code> — archived</li>
+      <li><code>transmission_lines_osm</code> — open data</li>
+    </ul>
+  </div>
+  <div class="schema">
+    <div class="hd">utilities</div>
+    <ul>
+      <li><code>water_wells</code></li>
+    </ul>
+  </div>
+  <div class="schema">
+    <div class="hd">land</div>
+    <ul>
+      <li><code>protected_areas</code></li>
+      <li><code>parcels</code></li>
+    </ul>
+  </div>
+  <div class="schema">
+    <div class="hd">soils</div>
+    <ul>
+      <li><code>map_units</code></li>
+    </ul>
+  </div>
+  <div class="schema s3">
+    <div class="hd">storage</div>
+    <ul>
+      <li><code>raster_assets</code> — S3 links</li>
+    </ul>
+  </div>
+  <div class="schema sys">
+    <div class="hd">public</div>
+    <ul>
+      <li><code>load_runs</code> — load history</li>
+      <li><code>source_checks</code> — update checks</li>
+      <li><code>layer_styles</code> — shared QGIS styles</li>
+    </ul>
+  </div>
+</div>
+
+<h3>3.3 Keeping the Data Current</h3>
+<p>
+  <b>Weekly check.</b> Once a week, each source is asked for its current version or last-updated date. Nothing is downloaded.
+  The result is recorded in <code>public.source_checks</code>, and any layer with newer data is flagged for the maintainers.
+</p>
+<p>
+  <b>Loads.</b> A Geomatics maintainer starts each load. The new data goes into a staging area first and replaces the
+  live layer in a single step, so users never see a half-loaded layer. Every load is recorded in <code>public.load_runs</code>.
+</p>
+<table>
+  <tr><th style="width:30%">Layer</th><th>How often the source changes</th></tr>
+  <tr><td>Wetlands</td><td>Twice a year (May and October)</td></tr>
+  <tr><td>Streams &amp; waterbodies</td><td>Yearly national release</td></tr>
+  <tr><td>State stream segments</td><td>Each TCEQ Integrated Report cycle</td></tr>
+  <tr><td>Floodplain — federal</td><td>Continuously, as FEMA map revisions take effect</td></tr>
+  <tr><td>Floodplain — state</td><td>As watersheds are completed or revised</td></tr>
+  <tr><td>National Register</td><td>Irregular</td></tr>
+  <tr><td>Cemeteries &amp; markers</td><td>No published schedule</td></tr>
+  <tr><td>Critical habitat</td><td>When designations are published in the Federal Register</td></tr>
+  <tr><td>Soils</td><td>Yearly</td></tr>
+  <tr><td>Topography</td><td>As new lidar is collected</td></tr>
+  <tr><td>Oil/gas wells &amp; pipelines</td><td>Constantly revised</td></tr>
+  <tr><td>Water wells</td><td>Nightly</td></tr>
+  <tr><td>Protected lands</td><td>About yearly</td></tr>
+  <tr><td>Parcels</td><td>Yearly</td></tr>
+  <tr><td>Transmission lines — HIFLD archive</td><td>Never. The source was shut down; loaded once</td></tr>
+  <tr><td>Transmission lines — OpenStreetMap</td><td>Daily extract; reloaded when maintainers choose</td></tr>
+</table>
+
+<h3>3.4 Electric Transmission Lines</h3>
+<p>
+  The federal public portal (HIFLD Open) was shut down on August 26, 2025, but its transmission line data was archived and is still free to download.
+  The database carries two separate layers, so users can compare them:
+</p>
+<table>
+  <tr><th style="width:24%">Layer</th><th style="width:38%">Strength</th><th>Limitation</th></tr>
+  <tr>
+    <td><code>energy.transmission_lines_hifld</code></td>
+    <td>Federal dataset compiled by Oak Ridge National Laboratory; consistent national coverage of 69–765 kV lines</td>
+    <td>Frozen. No updates after February 2025, so newer lines are missing</td>
+  </tr>
+  <tr>
+    <td><code>energy.transmission_lines_osm</code></td>
+    <td>Updated continuously by mappers; can show lines built after 2025</td>
+    <td>Volunteer data with uneven completeness and accuracy; not an official source</td>
+  </tr>
+</table>
+<div class="callout ref">
+  Both layers are for screening and reference only. Where they disagree, or where a line affects a project,
+  confirm its location and voltage with the utility.
+</div>
+
+<h2>4. Data Not Publicly Available</h2>
+<table>
+  <tr><th style="width:32%">Item</th><th>Reason</th></tr>
+  <tr><td>Archaeological sites</td><td>Confidential under federal and Texas law. Access is limited to qualified individuals with their own Texas Historical Commission login and may not be redistributed.</td></tr>
+  <tr><td>Texas rare species (TXNDD)</td><td>Released only by request to Texas Parks &amp; Wildlife, per project area.</td></tr>
+  <tr><td>Federal pipelines (NPMS)</td><td>GIS data is limited to pipeline operators and government officials.</td></tr>
+  <tr><td>TxDOT right-of-way</td><td>Published as an online map application only.</td></tr>
+  <tr><td>Local utilities (water, sanitary, storm, gas distribution, culverts)</td><td>Owned by individual cities and utilities; no statewide public dataset.</td></tr>
+  <tr><td>Tile drain</td><td>No public dataset maps tile drain lines.</td></tr>
+</table>
+<div class="callout warn">
+  These items require paid data, owner/client-provided data, or a per-project request. They are outside the Phase 1 scope.
+</div>
+
+<h2>5. Data Stored Outside the Database (AWS S3 or S3 compatible alternative)</h2>
+
+<h3>5.1 What goes to S3</h3>
+<p><b>Topography (USGS 3DEP 1-meter elevation models).</b></p>
+
+<h3>5.2 Why it cannot be stored in the database</h3>
+<ul>
+  <li><b>Size.</b> Texas covers about 268,000 square miles. At 1-meter resolution, that is roughly 690 billion elevation cells — on the order of 2.8 TB uncompressed. That is far larger than every other layer combined.</li>
+  <li><b>Data type.</b> Elevation models are rasters (grids of cells), not points, lines, or polygons. PostGIS is built for vector data; storing terabytes of raster in it would slow backups, restores, and the database itself.</li>
+  <li><b>Viewing.</b> Stored as Cloud Optimized GeoTIFFs (COGs) in S3, QGIS downloads only the part of the file that is on screen. No one downloads the whole dataset.</li>
+  <li><b>Cost.</b> Object storage costs far less per gigabyte than database storage.</li>
+</ul>
+
+<h3>5.3 Reference table</h3>
+<p>The database keeps a record of every elevation file, including its footprint, so users can see coverage in QGIS and find the right file. The table is <code>storage.raster_assets</code>:</p>
+<table>
+  <tr><th style="width:22%">Column</th><th>Holds</th></tr>
+  <tr><td><code>id</code></td><td>Unique ID for the record</td></tr>
+  <tr><td><code>layer</code></td><td>Which raster layer the file belongs to, e.g. <code>dem_1m</code></td></tr>
+  <tr><td><code>storage_system</code></td><td>Where the file is stored, e.g. <code>s3</code></td></tr>
+  <tr><td><code>storage_key</code></td><td>The file's path in that storage, e.g. <code>dem_1m/tx/USGS_1M_14_x50y327.tif</code></td></tr>
+  <tr><td><code>source</code></td><td>Where it came from, e.g. USGS 3DEP</td></tr>
+  <tr><td><code>source_date</code></td><td>Date published by the source</td></tr>
+  <tr><td><code>loaded_at</code></td><td>When it was added</td></tr>
+  <tr><td><code>footprint</code></td><td>Tile outline, drawn as a polygon in QGIS</td></tr>
+</table>
+<p>A single mosaic file (<code>dem_1m/tx/texas_dem.vrt</code>) is also stored with the tiles. It points to every tile so QGIS can open all of Texas as one layer.</p>
+<h2 class="pb">6. How the Reference Database Fits with Atlas</h2>
+<p>
+  Atlas is the Geomatics department's project application. The reference database is part of it: one PostgreSQL instance
+  holds two separate databases, and the Atlas code includes the reference loaders.
+</p>
+
+<div class="diagram">
+<svg viewBox="0 0 720 490" xmlns="http://www.w3.org/2000/svg" font-family="Segoe UI, Helvetica Neue, Arial, sans-serif" role="img" aria-label="How the reference database relates to Atlas">
+  <defs>
+    <marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M1 1L9 5L1 9" fill="none" stroke="#5b6878" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+    </marker>
+  </defs>
+
+  <!-- Users row -->
+  <rect x="20" y="20" width="200" height="58" rx="6" fill="#fff" stroke="#1f5f8b" stroke-width="1.4"/>
+  <text x="120" y="44" text-anchor="middle" font-size="13" font-weight="600" fill="#1f5f8b">Geomatics maintainers</text>
+  <text x="120" y="63" text-anchor="middle" font-size="11" fill="#5b6878">Run loads, review checks</text>
+
+  <rect x="260" y="20" width="200" height="58" rx="6" fill="#fff" stroke="#1f5f8b" stroke-width="1.4"/>
+  <text x="360" y="44" text-anchor="middle" font-size="13" font-weight="600" fill="#1f5f8b">Geomatics team</text>
+  <text x="360" y="63" text-anchor="middle" font-size="11" fill="#5b6878">Atlas app + QGIS</text>
+
+  <rect x="500" y="20" width="200" height="58" rx="6" fill="#fff" stroke="#8a6d0b" stroke-width="1.4"/>
+  <text x="600" y="44" text-anchor="middle" font-size="13" font-weight="600" fill="#8a6d0b">REPO users</text>
+  <text x="600" y="63" text-anchor="middle" font-size="11" fill="#5b6878">QGIS, read-only</text>
+
+  <!-- Atlas app -->
+  <rect x="140" y="128" width="200" height="66" rx="6" fill="#e8f1f8" stroke="#1f5f8b" stroke-width="1.4"/>
+  <text x="240" y="152" text-anchor="middle" font-size="13" font-weight="600" fill="#1f5f8b">Atlas application</text>
+  <text x="240" y="170" text-anchor="middle" font-size="11" fill="#5b6878">API + web app</text>
+  <text x="240" y="185" text-anchor="middle" font-size="11" fill="#5b6878">Includes the reference loaders</text>
+
+  <!-- Public sources -->
+  <rect x="20" y="236" width="150" height="66" rx="6" fill="#fff" stroke="#5b6878" stroke-width="1.2" stroke-dasharray="4 3"/>
+  <text x="95" y="261" text-anchor="middle" font-size="12" font-weight="600" fill="#1d2733">Public sources</text>
+  <text x="95" y="278" text-anchor="middle" font-size="11" fill="#5b6878">Federal, Texas,</text>
+  <text x="95" y="292" text-anchor="middle" font-size="11" fill="#5b6878">OpenStreetMap</text>
+
+  <!-- PostgreSQL instance -->
+  <rect x="210" y="226" width="490" height="156" rx="10" fill="#fafbfc" stroke="#4a5a6a" stroke-width="1.4"/>
+    <text x="226" y="373" font-size="11.5" fill="#4a5a6a"><tspan font-weight="600">PostgreSQL instance</tspan> · DigitalOcean managed · port 25060 · TLS</text>
+
+  <rect x="230" y="262" width="210" height="88" rx="6" fill="#e8f1f8" stroke="#1f5f8b" stroke-width="1.3"/>
+  <text x="335" y="284" text-anchor="middle" font-size="13" font-weight="600" fill="#1f5f8b">atlas database</text>
+  <text x="335" y="303" text-anchor="middle" font-size="11" fill="#5b6878">Projects, tasks, deliverables</text>
+  <text x="335" y="318" text-anchor="middle" font-size="11" fill="#5b6878">Project GIS, standards</text>
+  <text x="335" y="333" text-anchor="middle" font-size="11" fill="#5b6878">Edited daily by Geomatics</text>
+
+  <rect x="470" y="262" width="210" height="88" rx="6" fill="#fbf4dc" stroke="#8a6d0b" stroke-width="1.3"/>
+  <text x="575" y="284" text-anchor="middle" font-size="13" font-weight="600" fill="#8a6d0b">reference database</text>
+  <text x="575" y="303" text-anchor="middle" font-size="11" fill="#5b6878">Public GIS layers</text>
+  <text x="575" y="318" text-anchor="middle" font-size="11" fill="#5b6878">Load history, update checks</text>
+  <text x="575" y="333" text-anchor="middle" font-size="11" fill="#5b6878">Read-only for users</text>
+
+  <!-- S3 -->
+  <rect x="470" y="414" width="210" height="58" rx="6" fill="#fff" stroke="#6b4e9b" stroke-width="1.4"/>
+  <text x="575" y="438" text-anchor="middle" font-size="13" font-weight="600" fill="#6b4e9b">AWS S3</text>
+  <text x="575" y="456" text-anchor="middle" font-size="11" fill="#5b6878">Elevation rasters (COGs)</text>
+
+  <!-- Arrows -->
+  <!-- maintainers -> atlas app -->
+  <line x1="150" y1="78" x2="205" y2="126" stroke="#5b6878" stroke-width="1.4" marker-end="url(#ah)"/>
+  <!-- team -> atlas app -->
+  <line x1="330" y1="78" x2="285" y2="126" stroke="#5b6878" stroke-width="1.4" marker-end="url(#ah)"/>
+  <!-- public sources -> atlas app (loaders) -->
+  <path d="M95 236 L95 161 L138 161" fill="none" stroke="#5b6878" stroke-width="1.4" marker-end="url(#ah)"/>
+  <!-- atlas app -> atlas db -->
+  <line x1="260" y1="194" x2="300" y2="260" stroke="#5b6878" stroke-width="1.4" marker-end="url(#ah)"/>
+  <!-- atlas app -> reference db (loads) -->
+  <path d="M340 175 L520 175 L520 260" fill="none" stroke="#8a6d0b" stroke-width="1.4" marker-end="url(#ah)"/>
+  <text x="430" y="168" text-anchor="middle" font-size="10.5" fill="#8a6d0b">loads</text>
+  <!-- REPO users -> reference db -->
+  <line x1="640" y1="78" x2="640" y2="260" stroke="#8a6d0b" stroke-width="1.4" marker-end="url(#ah)"/>
+  <text x="650" y="170" font-size="10.5" fill="#8a6d0b">QGIS</text>
+  <!-- team QGIS -> atlas db and reference db (dashed) -->
+  <path d="M440 78 L440 112 L460 112 L460 210 L400 210 L400 260" fill="none" stroke="#1f5f8b" stroke-width="1.2" stroke-dasharray="4 3" marker-end="url(#ah)"/>
+  <path d="M460 210 L560 210 L560 260" fill="none" stroke="#1f5f8b" stroke-width="1.2" stroke-dasharray="4 3" marker-end="url(#ah)"/>
+  <text x="468" y="128" font-size="10.5" fill="#1f5f8b">QGIS</text>
+  <!-- reference db -> S3 -->
+  <line x1="575" y1="350" x2="575" y2="412" stroke="#6b4e9b" stroke-width="1.4" stroke-dasharray="4 3" marker-end="url(#ah)"/>
+  <text x="585" y="400" font-size="10.5" fill="#6b4e9b">links to files</text>
+</svg>
+</div>
+<p class="small">Solid lines: the Atlas application. Dashed blue lines: Geomatics QGIS connections. Gold lines: reference loads and REPO access.</p>
+
+<table>
+  <tr><th style="width:24%">Part</th><th>Role</th></tr>
+  <tr><td><code>atlas</code> database</td><td>Geomatics working data: projects, tasks, deliverables, project GIS and survey data, department standards. Not visible to REPO users.</td></tr>
+  <tr><td><code>reference</code> database</td><td>Public GIS layers for REPO and Geomatics. Read-only for users; only Geomatics maintainers load data.</td></tr>
+  <tr><td>Atlas application</td><td>Holds the reference loaders and update checks. Until the Atlas app is released, maintainers run the same loaders from their own computers. After release, a maintainer-only page shows each layer's last load and any available updates, with a button to start a load.</td></tr>
+  <tr><td>AWS S3</td><td>Elevation rasters, too large for the database. The <code>reference</code> database keeps a link to every file.</td></tr>
+</table>
+<div class="callout">
+  The two databases share one PostgreSQL instance but stay separate: REPO users are granted access to <code>reference</code> only,
+  and reference loads cannot affect Atlas data. The instance's automatic backups cover both databases.
+</div>
+
+<h2>7. Accessing the Data in QGIS</h2>
+
+<h3>7.1 Database layers (PostGIS)</h3>
+<p>Each user sets up the connection once. Access is read-only for REPO users; only maintainers can edit.</p>
+<pre>QGIS → Browser panel → right-click "PostgreSQL" → New Connection
+
+  Name:      Reference
+  Host:      &lt;database host, provided by Geomatics&gt;
+  Port:      25060
+  Database:  reference
+  SSL mode:  verify-full
+  Auth:      user's own login</pre>
+<p>
+  <code>verify-full</code> needs the database's CA certificate (a small file that lets QGIS confirm it is talking to the real database).
+  Geomatics provides the file and where to save it.
+</p>
+<p>
+  After connecting, every schema and table appears in the Browser panel. Drag a table onto the map to add it.
+  Maintainers save each layer's style to the database as its default style (stored in <code>public.layer_styles</code>), so every user sees the same symbology when the layer loads.
+</p>
+<div class="callout">
+  Port 25060 was tested from a company work laptop on November 13, 2026, and the connection succeeded.
+</div>
+
+<h3>7.2 Elevation data (S3)</h3>
+<p><b>Step 1 — Credentials (once per user, no admin rights needed).</b></p>
+<pre>QGIS → Settings → Options → System → Environment → Use custom variables
+
+  AWS_ACCESS_KEY_ID      = &lt;read-only key&gt;
+  AWS_SECRET_ACCESS_KEY  = &lt;read-only secret&gt;
+  AWS_DEFAULT_REGION     = &lt;bucket region&gt;
+
+Restart QGIS after saving.</pre>
+
+<p><b>Step 2 — Add the elevation layer.</b></p>
+<pre>QGIS → Layer → Data Source Manager → Raster
+
+  Source type:  Protocol: HTTP(S), cloud, etc.
+  Type:         AWS S3
+  Bucket:       &lt;bucket name, provided by Geomatics&gt;
+  Object key:   dem_1m/tx/texas_dem.vrt</pre>
+
+<p><b>Step 3 (optional) — Find a specific tile.</b> Add <code>storage.raster_assets</code> from the Reference connection to see tile footprints. Each record holds the storage location and path for that tile.</p>
+
+<div class="callout">
+  QGIS streams only the part of the elevation data in the current map view. Users do not download the full dataset.
+</div>
+
+<footer>
+  Reference GIS Database — Phase 1 (Texas) · Sources in Section 3.1 were checked against each agency's published pages on November 11, 2026;
+  electric transmission sources were checked on November 13, 2026.
+</footer>
+
+</body>
+</html>

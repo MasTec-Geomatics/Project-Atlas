@@ -63,6 +63,8 @@ Two primary assignment methods are planned:
 
 Tasks will be associated with projects and may include priorities, deadlines, descriptions, dependencies, assigned personnel, review requirements, and status history.
 
+Team members post written progress updates on their tasks, including blockers that need assistance.
+
 Claiming a task must be handled atomically to prevent multiple employees from claiming the same work simultaneously.
 
 Planned dashboards will provide employees with their assignments and available work, while managers will have visibility into workload, task progress, and outstanding deliverables.
@@ -109,6 +111,8 @@ The proposed lifecycle is:
 
 **WIP → Internal Review → Approved → Published → Superseded/Archived**
 
+A rejected revision is kept with its review notes, and the corrected work becomes a new revision.
+
 Approved deliverables may be published to designated Procore locations through an authorized integration.
 
 Publication records should capture the deliverable, revision, approval information, publication timestamp, destination, and result.
@@ -140,7 +144,7 @@ The objective is to establish a traceable publication process and reduce rework 
 | GIS Processing    | GDAL/OGR, PDAL, and related libraries | Geospatial processing as required                |
 | GIS Editing       | QGIS                                  | Spatial data editing and analysis                |
 | Point Clouds      | Potree                                | Browser-based point cloud visualization          |
-| Authentication    | Clerk (temporary) → Okta              | Identity (see ADR 0012)                          |
+| Authentication    | Clerk (temporary) → Okta              | SSO login only; roles live in Atlas (ADR 0012)   |
 | CAD Documents     | Autodesk Docs                         | Access to relevant drawings and documents        |
 | Containers        | Podman                                | Local and containerized application environments |
 | Orchestration     | Kubernetes (planned)                  | Deployment orchestration when required           |
@@ -174,10 +178,9 @@ The frontend, core API, background workers, and storage systems have distinct re
        +---------v----------+          +---------v---------+
        | PostgreSQL/PostGIS |          |   Job Processing  |
        |                    |          |                   |
-       | Projects / Tasks   |          | GIS / Integrations|
-       | Spatial Data       |          | Python Workers    |
-       | Metadata / Jobs    |          +---------+---------+
-       +--------------------+                    |
+       | atlas database     |          | GIS / Integrations|
+       | reference database |          | Python Workers    |
+       +--------------------+          +---------+---------+
                                                  |
                                       +----------v---------+
                                       | External Services  |
@@ -190,7 +193,7 @@ The diagram represents logical responsibilities rather than a required physical 
 
 ### Modular Architecture
 
-The API is organized around application domains, such as projects, tasks, datasets, survey points, and standards.
+The API is organized around application domains, such as projects, tasks, datasets, survey points, standards, and reference data.
 
 Business rules should remain separate from HTTP routing and framework-specific dependencies wherever practical.
 
@@ -213,9 +216,9 @@ Long-running and scheduled processing will execute outside the FastAPI request l
 Planned worker responsibilities include:
 
 - GIS data acquisition and ingestion.
+- Reference data loads and weekly source update checks.
 - Coordinate transformations and geometry validation.
 - Raster, imagery, and point cloud processing.
-- Scheduled dataset refreshes.
 - Procore project synchronization.
 - Approved deliverable publication.
 - Other enterprise integrations.
@@ -226,35 +229,32 @@ The initial queue and scheduling implementation has not been finalized.
 
 ### Database
 
-PostgreSQL/PostGIS serves as the primary operational and geospatial data platform.
+Atlas uses two databases in one PostgreSQL instance:
 
-Logical schema boundaries may include:
+| Database    | Holds                                                                  |
+| ----------- | ---------------------------------------------------------------------- |
+| `atlas`     | Projects, tasks, deliverables, project GIS data, standards, audit log  |
+| `reference` | Public GIS layers, read-only for users (ADR 0017)                      |
 
-Atlas uses two databases on the same PostgreSQL server:
+Schemas in `atlas` (table design in `docs/atlas-db.dbml`):
 
-| Database    | Holds                                                        |
-| ----------- | ------------------------------------------------------------ |
-| `atlas`     | Projects, tasks, assignments, workflow, and project GIS data |
-| `reference` | Public GIS layers, read-only for users (ADR 0017)            |
+| Schema       | Responsibility                                                   |
+| ------------ | ---------------------------------------------------------------- |
+| `operations` | Users and roles, projects, tasks, deliverables, and publications |
+| `gis`        | Project-specific spatial data: datasets and survey points        |
+| `standards`  | Coordinate system profiles and point codes                       |
+| `audit`      | Every insert, update, and delete on every `atlas` table          |
 
-Proposed schemas in `atlas`:
-
-| Schema       | Responsibility                                      |
-| ------------ | --------------------------------------------------- |
-| `operations` | Projects, tasks, assignments, and workflow records  |
-| `gis`        | Project-specific spatial information                |
-| `catalog`    | Dataset sources, metadata, provenance, and licenses |
-| `staging`    | Temporary ingestion and validation data             |
-
-These are proposed logical boundaries; the final `atlas` model has not yet been established.
+Roles and permissions are stored in Atlas (`operations.roles`, `operations.user_roles`). The identity provider handles sign-in only.
 
 ### Reference Database
 
-The `reference` database holds public GIS layers for the Risk Management and Estimating team, starting with Texas: wetlands, floodplain, cultural sites, critical habitat, wells and pipelines, protected lands, parcels, and soils. The table design is in `docs/reference-db.dbml`.
+The `reference` database holds public GIS layers for the Risk Management and Estimating team, starting with Texas: wetlands, streams, floodplain, cultural sites, critical habitat, oil/gas wells and pipelines, electric transmission lines, water wells, protected lands, parcels, and soils. The table design is in `docs/reference-db.dbml`, and the source report is `docs/public-data-access-report.html`.
 
 - QGIS users connect directly over TLS with read-only logins (ADR 0019).
 - Maintainers load and refresh layers. Before MVP, loads run from a maintainer's machine. After MVP, they run from an Atlas admin page (ADR 0018).
-- Elevation rasters are stored in AWS S3, not in the database (ADR 0017).
+- Every layer table has a `state` column, so more states are added as rows, not new tables.
+- Elevation rasters are stored in object storage, not in the database (ADR 0017).
 
 ## Containers and Deployment
 
@@ -277,7 +277,7 @@ In Kubernetes, components requiring independent scaling or scheduling can be dep
 
 The browser only talks to one origin. A reverse proxy (or Kubernetes ingress) routes `/api/*` to the API and all other paths to the frontend, so the API does not use CORS. In development, the Vite dev server forwards `/api` to the API. See ADR 0013.
 
-Production cloud hosting, network architecture, persistent storage, and orchestration details remain under evaluation.
+The production database is a DigitalOcean managed PostgreSQL cluster (port 25060, TLS) holding both the `atlas` and `reference` databases. Production hosting for the application, network architecture, persistent storage, and orchestration details remain under evaluation.
 
 ## Enterprise Integrations
 
@@ -331,14 +331,16 @@ Integration details, authentication, and permitted document operations remain to
 
 ### GIS Data Providers
 
-**Status: Planned**
+**Status: In progress (reference database)**
 
-Potential sources include:
+Sources include:
 
 - USGS
+- USFWS, FEMA, NPS, and USDA NRCS
 - NOAA / NGS
 - U.S. Census Bureau
-- State and regional GIS repositories
+- Texas state agencies (TxGIO, TCEQ, TWDB, Railroad Commission, Texas Historical Commission)
+- OpenStreetMap
 - County and municipal GIS systems
 - Regrid and other licensed providers
 
@@ -359,6 +361,7 @@ Guiding principles:
 5. WIP information must remain restricted to authorized personnel.
 6. Only approved deliverables should be released through the official publication process.
 7. Database and storage permissions must enforce access restrictions independently of the user interface.
+8. Every change to `atlas` data is recorded in the audit log, including edits made directly in QGIS.
 
 Specific role definitions and permission policies are still being developed.
 
@@ -371,8 +374,13 @@ project-atlas/
 ├── README.md
 ├── mise.toml
 ├── .env.example
+├── deploy/
+│   └── local/                  # local PostgreSQL pod and reference setup
 ├── docs/
-│   └── adr/
+│   ├── adr/
+│   ├── atlas-db.dbml
+│   ├── reference-db.dbml
+│   └── public-data-access-report.html
 ├── api/
 │   ├── main.py
 │   ├── pyproject.toml
@@ -409,6 +417,7 @@ The repository structure will evolve as features are introduced.
 - Node.js and Bun
 - PostgreSQL with PostGIS for database-dependent features
 - Podman for container-based workflows
+- GDAL (`ogr2ogr`) for reference data loads
 
 Required runtime and tool versions are defined in `mise.toml`.
 
@@ -440,13 +449,14 @@ Full application startup instructions will be added when the database, API, and 
 
 ### Local Database
 
-For development, PostgreSQL with PostGIS runs in its own Podman pod, defined as Kubernetes YAML in `deploy/local/`. Production is expected to use managed PostgreSQL (see ADR 0008).
+For development, one PostgreSQL instance with PostGIS runs in its own Podman pod, `postgres`, defined as Kubernetes YAML in `deploy/local/`. It holds both the `atlas` and `reference` databases. Production uses a managed PostgreSQL cluster (see ADR 0008).
 
 | File                                       | Purpose                                            |
 | ------------------------------------------ | -------------------------------------------------- |
 | `deploy/local/postgis.yaml`                | Database pod and its `PersistentVolumeClaim`       |
 | `deploy/local/postgis-secret.example.yaml` | Template for the database credentials `Secret`     |
 | `deploy/local/postgis-secret.yaml`         | Your local credentials (gitignored, not committed) |
+| `deploy/local/reference-setup.sql`         | Reference roles and database, run once             |
 
 Run these commands from the repository root.
 
@@ -456,11 +466,10 @@ Create your credentials file once, then set your own password in it:
 cp deploy/local/postgis-secret.example.yaml deploy/local/postgis-secret.yaml
 ```
 
-Start the database. The `Secret` must be loaded before the pod:
+Start the database:
 
 ```sh
-podman kube play deploy/local/postgis-secret.yaml
-podman kube play deploy/local/postgis.yaml
+mise run db:up
 ```
 
 The database listens on `localhost:5432`.
@@ -468,30 +477,26 @@ The database listens on `localhost:5432`.
 Stop the database. The data is kept:
 
 ```sh
-podman kube down deploy/local/postgis.yaml
-```
-
-Remove the stored credentials:
-
-```sh
-podman kube down deploy/local/postgis-secret.yaml
+mise run db:down
 ```
 
 Delete the database and all its data:
 
 ```sh
-podman kube down --force deploy/local/postgis.yaml
+mise run db:delete
 ```
 
-Credentials are only applied when the database is first created. To change them later, delete the database with `--force` and start it again.
+Credentials are only applied when the database is first created. To change them later, delete the database and start it again.
 
 #### Reference Database
 
-The `reference` database runs on the same local server. Create its roles and database once, after the pod is running:
+The `reference` database runs in the same local instance. Create its roles and database once, after the pod is running:
 
 ```sh
 mise run db:reference
 ```
+
+Then apply its migrations:
 
 ```sh
 mise run db:migrate:reference
@@ -499,19 +504,36 @@ mise run db:migrate:reference
 
 ## Development Roadmap
 
-| Phase | Scope                                                                 | Status      |
-| ----- | --------------------------------------------------------------------- | ----------- |
-| 1     | Repository setup and initial architecture                             | Done        |
-| 2     | Foundation: API core conventions, tooling, migrations, web foundation | In progress |
-| 3     | Team demo: projects, tasks, dashboard, map, temporary auth, hosted    | Planned     |
-| 4     | Okta identity and QGIS database access                                | Planned     |
-| 5     | Background workers and GIS ingestion                                  | Planned     |
-| 6     | Datasets and point clouds                                             | Planned     |
-| 7     | Deliverable review and release workflows                              | Planned     |
-| 8     | Procore and reporting integrations                                    | Discovery   |
-| 9     | Production deployment and operational hardening                       | Planned     |
+Phases follow the milestones on the Project Atlas board.
+
+| Phase | Scope                                                                        | Status      |
+| ----- | ---------------------------------------------------------------------------- | ----------- |
+| 1     | Repository setup and initial architecture                                    | Done        |
+| 2     | Reference database (local): migrations, models, loaders, Texas layers        | In progress |
+| 3     | Reference database (production): managed cluster, logins, QGIS, first loads  | Planned     |
+| 4     | Foundation: API core conventions, tooling, migrations, web foundation        | In progress |
+| 5     | Team demo: projects, tasks, dashboard, map, temporary auth, hosted           | Planned     |
+| 6     | Identity and projects: Okta sign-in, roles, project records                  | Planned     |
+| 7     | Reference admin: maintainer page for load status, update checks, and loads   | Planned     |
+| 8     | Datasets and point clouds                                                    | Planned     |
+| 9     | Survey data and standards                                                    | Planned     |
+| 10    | Maps                                                                         | Planned     |
+| 11    | Deliverable review and release workflows                                     | Planned     |
+| 12    | Procore and reporting integrations                                           | Discovery   |
+| 13    | Production deployment and operational hardening                              | Planned     |
 
 The roadmap is directional rather than a fixed implementation schedule. Feature priorities may change as the Geomatics group's requirements and enterprise integration capabilities become clearer.
+
+### Future Features
+
+Planned after MVP. Not yet scheduled.
+
+- **More states in the reference database:** Load additional states into the existing layer tables, using their `state` column.
+- **Reference source list:** A `sources` table in the `reference` database holding each layer's download link per state, so maintainers can update links or add states without a code change.
+- **Paid reference data:** Licensed datasets such as Regrid parcels.
+- **Scheduling view:** Calendar and Gantt views of tasks, with the critical path calculated from task dependencies.
+- **Resource loading:** Workload per person across the schedule.
+- **Weekly AI summary:** A summary of task progress updates and blockers, prepared before the weekly team meeting.
 
 ## Architecture Decision Records
 

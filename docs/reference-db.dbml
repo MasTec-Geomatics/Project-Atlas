@@ -1,11 +1,39 @@
-// REPO GIS Database — Phase 1: Texas
-// All geometry stored in WGS84 (EPSG:4326)
+// reference database
+// Public GIS layers, starting with Texas. More states are added as rows, not tables:
+// every layer table has a `state` column, and a load replaces only that state's rows.
+// All geometry stored in WGS84 (EPSG:4326).
 // Spatial indexes are GiST; DBML can't express that type, so they're marked with a note.
+
+Project reference {
+  database_type: 'PostgreSQL'
+  Note: 'Read-only for users. Loaded by Geomatics maintainers (ADR 0017, 0018, 0019).'
+}
+
+// ---------- public: sources and load bookkeeping ----------
+
+Table public.sources {
+  id bigint [pk, increment]
+  layer text [not null, note: 'e.g. hydro.wetlands']
+  state text [not null, note: 'Two-letter code, e.g. TX']
+  download_url text [not null]
+  format text [not null, note: 'e.g. gpkg, shp, gdb, osm.pbf']
+  license text
+  attribution text
+  is_enabled boolean [not null, default: true]
+  updated_at timestamptz [not null, default: `now()`]
+
+  indexes {
+    (layer, state) [unique]
+  }
+
+  Note: 'Where each layer is downloaded from, per state. Maintainers edit rows; no code change for a new link.'
+}
 
 Table public.load_runs {
   id bigint [pk, increment]
   layer text [not null, note: 'e.g. hydro.wetlands']
-  status text [not null, note: "check: 'running' | 'skipped' | 'succeeded' | 'failed'"]
+  state text [not null, note: 'e.g. TX']
+  status text [not null, note: "check: 'running' | 'succeeded' | 'failed'"]
   source_version text [note: 'Last-Modified / ETag / release date from source']
   rows_loaded integer
   error text
@@ -13,7 +41,21 @@ Table public.load_runs {
   finished_at timestamptz
 
   indexes {
-    (layer, started_at) [name: 'load_runs_layer_started_idx']
+    (layer, state, started_at) [name: 'load_runs_layer_state_started_idx']
+  }
+}
+
+Table public.source_checks {
+  id bigint [pk, increment]
+  layer text [not null, note: 'e.g. hydro.wetlands']
+  state text [not null, note: 'e.g. TX']
+  checked_at timestamptz [not null, default: `now()`]
+  source_version text [note: 'Last-Modified / ETag / release date from source']
+  update_available boolean [not null]
+  error text [note: 'Set when the check itself failed']
+
+  indexes {
+    (layer, state, checked_at)
   }
 }
 
@@ -21,54 +63,63 @@ Table public.load_runs {
 
 Table hydro.wetlands {
   id bigint [pk, increment]
+  state text [not null]
   cowardin_code text [not null]
   wetland_type text [not null]
   acres numeric
   geom "geometry(MultiPolygon, 4326)" [not null]
 
   indexes {
+    state
     geom [name: 'wetlands_geom_idx', note: 'GiST']
   }
 }
 
 Table hydro.flowlines {
   id bigint [pk, increment]
+  state text [not null]
   id3dhp text [not null, unique]
   name text
   feature_type text [not null, note: 'River, Canal (incl. ditches), Drainageway, ...']
   geom "geometry(MultiLineString, 4326)" [not null]
 
   indexes {
+    state
     geom [name: 'flowlines_geom_idx', note: 'GiST']
   }
 }
 
 Table hydro.waterbodies {
   id bigint [pk, increment]
+  state text [not null]
   id3dhp text [not null, unique]
   name text
   feature_type text [not null]
   geom "geometry(MultiPolygon, 4326)" [not null]
 
   indexes {
+    state
     geom [name: 'waterbodies_geom_idx', note: 'GiST']
   }
 }
 
 Table hydro.stream_segments {
   id bigint [pk, increment]
+  state text [not null]
   segment_id text [not null]
   segment_name text
   basin text
   geom "geometry(Geometry, 4326)" [not null]
 
   indexes {
+    state
     geom [name: 'stream_segments_geom_idx', note: 'GiST']
   }
 }
 
 Table hydro.flood_fema {
   id bigint [pk, increment]
+  state text [not null]
   flood_zone text [not null]
   zone_subtype text
   sfha boolean [not null, note: 'Special Flood Hazard Area']
@@ -76,17 +127,20 @@ Table hydro.flood_fema {
   geom "geometry(MultiPolygon, 4326)" [not null]
 
   indexes {
+    state
     geom [name: 'flood_fema_geom_idx', note: 'GiST']
   }
 }
 
 Table hydro.flood_ble {
   id bigint [pk, increment]
+  state text [not null]
   huc8 text [not null]
   flood_zone text [not null]
   geom "geometry(MultiPolygon, 4326)" [not null]
 
   indexes {
+    state
     geom [name: 'flood_ble_geom_idx', note: 'GiST']
   }
 }
@@ -95,33 +149,39 @@ Table hydro.flood_ble {
 
 Table cultural.nrhp {
   id bigint [pk, increment]
+  state text [not null]
   ref_number text [not null]
   name text [not null]
   geom "geometry(Geometry, 4326)" [not null, note: 'points and polygons']
 
   indexes {
+    state
     geom [name: 'nrhp_geom_idx', note: 'GiST']
   }
 }
 
 Table cultural.cemeteries {
   id bigint [pk, increment]
+  state text [not null]
   name text
   location_known boolean [not null, note: 'false = vicinity cemetery']
   geom "geometry(Geometry, 4326)" [not null]
 
   indexes {
+    state
     geom [name: 'cemeteries_geom_idx', note: 'GiST']
   }
 }
 
 Table cultural.markers {
   id bigint [pk, increment]
+  state text [not null]
   marker_number text
   title text [not null]
   geom "geometry(Point, 4326)" [not null]
 
   indexes {
+    state
     geom [name: 'markers_geom_idx', note: 'GiST']
   }
 }
@@ -130,6 +190,7 @@ Table cultural.markers {
 
 Table environment.critical_habitat {
   id bigint [pk, increment]
+  state text [not null]
   common_name text [not null]
   scientific_name text [not null]
   listing_status text [not null]
@@ -137,6 +198,7 @@ Table environment.critical_habitat {
   geom "geometry(Geometry, 4326)" [not null]
 
   indexes {
+    state
     geom [name: 'critical_habitat_geom_idx', note: 'GiST']
   }
 }
@@ -145,17 +207,20 @@ Table environment.critical_habitat {
 
 Table energy.oilgas_wells {
   id bigint [pk, increment]
+  state text [not null]
   api_number text [not null]
   well_type text
   geom "geometry(Point, 4326)" [not null]
 
   indexes {
+    state
     geom [name: 'oilgas_wells_geom_idx', note: 'GiST']
   }
 }
 
 Table energy.pipelines {
   id bigint [pk, increment]
+  state text [not null]
   t4_permit text
   operator_name text
   commodity text
@@ -164,19 +229,53 @@ Table energy.pipelines {
   geom "geometry(MultiLineString, 4326)" [not null]
 
   indexes {
+    state
     geom [name: 'pipelines_geom_idx', note: 'GiST']
   }
+}
+
+Table energy.transmission_lines_hifld {
+  id bigint [pk, increment]
+  state text [not null]
+  owner text
+  voltage_kv numeric
+  geom "geometry(MultiLineString, 4326)" [not null]
+
+  indexes {
+    state
+    geom [name: 'transmission_lines_hifld_geom_idx', note: 'GiST']
+  }
+
+  Note: 'HIFLD Open archive (DataLumos). Frozen; data dated 2025-02-19. Confirm field mapping when the loader is written.'
+}
+
+Table energy.transmission_lines_osm {
+  id bigint [pk, increment]
+  state text [not null]
+  osm_id bigint [not null]
+  operator text [note: 'OSM operator tag']
+  voltage text [note: 'OSM voltage tag, as tagged (e.g. 138000 or 345000;138000)']
+  geom "geometry(MultiLineString, 4326)" [not null]
+
+  indexes {
+    (state, osm_id) [unique]
+    geom [name: 'transmission_lines_osm_geom_idx', note: 'GiST']
+  }
+
+  Note: 'OpenStreetMap power=line, Geofabrik state extract. © OpenStreetMap contributors, ODbL.'
 }
 
 // ---------- utilities ----------
 
 Table utilities.water_wells {
   id bigint [pk, increment]
-  state_well_number text [not null, unique]
+  state text [not null]
+  state_well_number text [not null]
   well_use text
   geom "geometry(Point, 4326)" [not null]
 
   indexes {
+    (state, state_well_number) [unique]
     geom [name: 'water_wells_geom_idx', note: 'GiST']
   }
 }
@@ -185,6 +284,7 @@ Table utilities.water_wells {
 
 Table land.protected_areas {
   id bigint [pk, increment]
+  state text [not null]
   unit_name text
   manager_name text
   category text [not null, note: "check: 'Fee' | 'Easement' | 'Designation'"]
@@ -192,12 +292,14 @@ Table land.protected_areas {
   geom "geometry(MultiPolygon, 4326)" [not null]
 
   indexes {
+    state
     geom [name: 'protected_areas_geom_idx', note: 'GiST']
   }
 }
 
 Table land.parcels {
   id bigint [pk, increment]
+  state text [not null]
   county text [not null]
   prop_id text
   owner_name text
@@ -205,6 +307,7 @@ Table land.parcels {
   geom "geometry(MultiPolygon, 4326)" [not null]
 
   indexes {
+    state
     geom [name: 'parcels_geom_idx', note: 'GiST']
   }
 }
@@ -213,44 +316,34 @@ Table land.parcels {
 
 Table soils.map_units {
   id bigint [pk, increment]
+  state text [not null]
   mukey text [not null]
   musym text
   muname text
   geom "geometry(MultiPolygon, 4326)" [not null]
 
   indexes {
+    state
     geom [name: 'map_units_geom_idx', note: 'GiST']
   }
 }
 
-// ---------- storage (S3) ----------
+// ---------- storage ----------
 
 Table storage.raster_assets {
   id bigint [pk, increment]
+  state text [not null]
   layer text [not null, note: 'e.g. dem_1m']
-  s3_key text [not null, unique]
-  url text [not null]
+  storage_system text [not null, note: "check: values set when systems are chosen, e.g. 's3', 'spaces', 'local'"]
+  storage_key text [not null, note: 'Path within the storage system, e.g. dem_1m/tx/USGS_1M_14_x50y327.tif']
   source text [not null]
   source_date date
   loaded_at timestamptz [not null, default: `now()`]
   footprint "geometry(Polygon, 4326)" [not null]
 
   indexes {
+    (storage_system, storage_key) [unique]
+    state
     footprint [name: 'raster_assets_footprint_idx', note: 'GiST']
-  }
-
-// ---------- source checks -------------
-
-Table public.source_checks {
-    id bigint [pk, increment]
-    layer text [not null, note: 'e.g. hydro.wetlands']
-    checked_at timestamptz [not null, default: `now()`]
-    source_version text [note: 'Last-Modified / ETag / release date from source']
-    update_available boolean [not null]
-    error text [note: 'Set when the check itself failed']
-
-    indexes {
-        (layer, checked_at)
-      }
   }
 }
