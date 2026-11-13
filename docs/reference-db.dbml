@@ -238,4 +238,19 @@ Table storage.raster_assets {
   indexes {
     footprint [name: 'raster_assets_footprint_idx', note: 'GiST']
   }
+
+// ---------- source checks -------------
+
+Table public.source_checks {
+    id bigint [pk, increment]
+    layer text [not null, note: 'e.g. hydro.wetlands']
+    checked_at timestamptz [not null, default: `now()`]
+    source_version text [note: 'Last-Modified / ETag / release date from source']
+    update_available boolean [not null]
+    error text [note: 'Set when the check itself failed']
+
+    indexes {
+        (layer, checked_at)
+      }
+  }
 }

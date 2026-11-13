@@ -22,3 +22,8 @@ mise.local.toml
 # OS
 .DS_Store
 Thumbs.db
+
+# Editor's
+.idea/
+.vscode/
+!.vscode/settings.json
