@@ -12,7 +12,7 @@ api_v1 = APIRouter(prefix="/api/v1")
 
 @app.get("/api/health")
 def health_check() -> dict[str, str]:
-    return {"status": "ok"}
+    return {"status": "OK"}
 
 
 app.include_router(api_v1)
