@@ -27,3 +27,7 @@ db-migrate:
 # Apply reference database migrations
 db-migrate-reference:
     cd api && uv run alembic -n reference upgrade head
+
+# Run PyTest in api
+api-test:
+    cd api && uv run pytest
