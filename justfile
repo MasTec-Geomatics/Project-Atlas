@@ -31,3 +31,18 @@ db-migrate-reference:
 # Run PyTest in api
 api-test:
     cd api && uv run pytest
+
+# Run the API with auto-reload
+api-dev:
+    cd api && uv run fastapi dev
+
+# Run ruff and mypy in api
+api-check:
+    cd api && uv run ruff check .
+    cd api && uv run ruff format --check .
+    cd api && uv run mypy
+
+# Fix lint issues and format code in api
+api-fix:
+    cd api && uv run ruff check --fix .
+    cd api && uv run ruff format .
