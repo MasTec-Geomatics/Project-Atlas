@@ -149,7 +149,7 @@ The objective is to establish a traceable publication process and reduce rework 
 | Containers        | Podman                                | Local and containerized application environments |
 | Orchestration     | Kubernetes (planned)                  | Deployment orchestration when required           |
 | Python Tooling    | ruff / mypy / pytest                  | Linting, formatting, type checking, tests        |
-| Development Tools | mise / uv / Bun / Vite+               | Runtime, dependency, and frontend tooling        |
+| Development Tools | just / uv / Bun / Vite+               | Tasks, Python, dependency, and frontend tooling  |
 
 Components listed here include both existing project decisions and planned capabilities. Production infrastructure and some library selections remain subject to evaluation.
 
@@ -372,7 +372,7 @@ The current repository follows this general structure:
 ```text
 project-atlas/
 ├── README.md
-├── mise.toml
+├── justfile                    # local development tasks
 ├── .env.example
 ├── deploy/
 │   └── local/                  # local PostgreSQL pod and reference setup
@@ -382,6 +382,7 @@ project-atlas/
 │   ├── reference-db.dbml
 │   └── public-data-access-report.html
 ├── api/
+│   ├── .python-version         # Python version for uv
 │   ├── main.py
 │   ├── pyproject.toml
 │   ├── alembic.ini
@@ -412,22 +413,18 @@ The repository structure will evolve as features are introduced.
 ### Requirements
 
 - Git
-- mise
-- Python and uv
+- just (task runner)
+- uv (installs Python and the API's dependencies)
 - Node.js and Bun
 - PostgreSQL with PostGIS for database-dependent features
 - Podman for container-based workflows
 - GDAL (`ogr2ogr`) for reference data loads
 
-Required runtime and tool versions are defined in `mise.toml`.
+The Python version is set in `api/.python-version`. `uv` installs that version automatically the first time it runs.
+
+Local development tasks are recipes in the `justfile`. Run `just` from the repository root to list them.
 
 ### Initial Setup
-
-Install the configured development tools:
-
-```sh
-mise install
-```
 
 Install backend dependencies:
 
@@ -469,7 +466,7 @@ cp deploy/local/postgis-secret.example.yaml deploy/local/postgis-secret.yaml
 Start the database:
 
 ```sh
-mise run db:up
+just db-up
 ```
 
 The database listens on `localhost:5432`.
@@ -477,13 +474,13 @@ The database listens on `localhost:5432`.
 Stop the database. The data is kept:
 
 ```sh
-mise run db:down
+just db-down
 ```
 
 Delete the database and all its data:
 
 ```sh
-mise run db:delete
+just db-delete
 ```
 
 Credentials are only applied when the database is first created. To change them later, delete the database and start it again.
@@ -493,13 +490,13 @@ Credentials are only applied when the database is first created. To change them 
 The `reference` database runs in the same local instance. Create its roles and database once, after the pod is running:
 
 ```sh
-mise run db:reference
+just db-reference
 ```
 
 Then apply its migrations:
 
 ```sh
-mise run db:migrate:reference
+just db-migrate-reference
 ```
 
 ## Development Roadmap
