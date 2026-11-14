@@ -16,7 +16,7 @@ from logging.config import fileConfig
 
 from alembic import context
 from geoalchemy2 import alembic_helpers
-from sqlalchemy import create_engine, pool
+from sqlalchemy import Connection, create_engine, pool
 from sqlalchemy.sql.schema import SchemaItem
 
 from src.core.config import settings
@@ -30,12 +30,13 @@ if config.config_file_name is not None:
 target_metadata = metadata
 database_url = str(settings.reference_database_url)
 
+
 def include_object(
-        obj: SchemaItem,
-        name: str | None,
-        type_: str,
-        reflected: bool,
-        compare_to: SchemaItem | None,
+    obj: SchemaItem,
+    name: str | None,
+    type_: str,
+    reflected: bool,
+    compare_to: SchemaItem | None,
 ) -> bool:
     """Decide whether autogenerate compares a database object.
 
@@ -57,6 +58,7 @@ def include_object(
         return False
     return bool(alembic_helpers.include_object(obj, name, type_, reflected, compare_to))
 
+
 def run_migrations_offline() -> None:
     """Write the migration SQL to stdout instead of running it."""
     context.configure(
@@ -74,21 +76,38 @@ def run_migrations_offline() -> None:
 
 
 def run_migrations_online() -> None:
-    """Run the migrations against the reference database."""
-    connectable = create_engine(database_url, poolclass=pool.NullPool)
+    """Run the migrations against the reference database.
 
-    with connectable.connect() as connection:
-        context.configure(
-            connection=connection,
-            target_metadata=target_metadata,
-            include_schemas=True,
-            include_object=include_object,
-            process_revision_directives=alembic_helpers.writer,
-            render_item=alembic_helpers.render_item,
-        )
+    Uses the connection in ``config.attributes["connection"]`` when one is given, so the
+    tests can migrate the reference test database. Otherwise connects to
+    ``REFERENCE_DATABASE_URL``.
+    """
+    connection = config.attributes.get("connection")
+    if connection is None:
+        engine = create_engine(database_url, poolclass=pool.NullPool)
+        with engine.connect() as connection:
+            _run_migrations(connection)
+    else:
+        _run_migrations(connection)
 
-        with context.begin_transaction():
-            context.run_migrations()
+
+def _run_migrations(connection: Connection) -> None:
+    """Configure Alembic with a connection and run the migrations.
+
+    Args:
+        connection: Open connection to the database being migrated.
+    """
+    context.configure(
+        connection=connection,
+        target_metadata=target_metadata,
+        include_schemas=True,
+        include_object=include_object,
+        process_revision_directives=alembic_helpers.writer,
+        render_item=alembic_helpers.render_item,
+    )
+
+    with context.begin_transaction():
+        context.run_migrations()
 
 
 if context.is_offline_mode():
