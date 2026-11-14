@@ -13,7 +13,7 @@ db-down:
 
 # Delete the local PostgreSQL pod, its data, and its credentials
 [confirm("Delete the local database and all its data?")]
-db-down:
+db-delete:
     podman kube down deploy/local/postgis.yaml
 
 # Create the reference roles and database (safe to rerun)
