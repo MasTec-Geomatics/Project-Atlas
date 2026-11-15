@@ -1,6 +1,7 @@
 from collections.abc import Iterator
+from typing import Any, ClassVar
 
-from sqlalchemy import MetaData, create_engine
+from sqlalchemy import MetaData, Text, create_engine
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
 from src.core.config import settings
@@ -37,9 +38,13 @@ ReferenceSessionLocal = sessionmaker(bind=reference_engine, autoflush=False, exp
 
 
 class ReferenceBase(DeclarativeBase):
-    """Parent class for every reference table model."""
+    """Parent class for every reference table model.
+
+    ``str`` columns map to PostgreSQL ``text`` (ADR 0015).
+    """
 
     metadata = MetaData(naming_convention=NAMING_CONVENTION)
+    type_annotation_map: ClassVar[dict[Any, Any]] = {str: Text}
 
 
 def get_reference_session() -> Iterator[Session]:
