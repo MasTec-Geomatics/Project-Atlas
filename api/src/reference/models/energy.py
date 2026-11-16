@@ -11,6 +11,7 @@ from src.core.database import ReferenceBase
 SCHEMA = "energy"
 
 
+# noinspection SpellCheckingInspection
 class OilGasWell(ReferenceBase):
     """RRC oil and gas wells."""
 

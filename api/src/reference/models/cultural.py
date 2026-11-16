@@ -9,6 +9,7 @@ from src.core.database import ReferenceBase
 SCHEMA = "cultural"
 
 
+# noinspection SpellCheckingInspection
 class NationalRegisterProperty(ReferenceBase):
     """NPS National Register of Historic Places (points and polygons)."""
 

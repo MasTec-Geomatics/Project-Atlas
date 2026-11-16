@@ -37,6 +37,7 @@ branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
 
+# noinspection SpellCheckingInspection
 def upgrade() -> None:
     """Upgrade schema."""
     op.execute("CREATE EXTENSION IF NOT EXISTS postgis")
@@ -116,6 +117,7 @@ def upgrade() -> None:
         postgresql_using="gist",
         postgresql_ops={},
     )
+    # noinspection SpellCheckingInspection
     op.create_geospatial_table(
         "nrhp",
         sa.Column("id", sa.BigInteger(), sa.Identity(always=False), nullable=False),
@@ -137,9 +139,11 @@ def upgrade() -> None:
         sa.PrimaryKeyConstraint("id", name=op.f("pk_nrhp")),
         schema="cultural",
     )
+    # noinspection SpellCheckingInspection
     op.create_index(
         op.f("ix_cultural_nrhp_state"), "nrhp", ["state"], unique=False, schema="cultural"
     )
+    # noinspection SpellCheckingInspection
     op.create_geospatial_index(
         "nrhp_geom_idx",
         "nrhp",
@@ -149,6 +153,7 @@ def upgrade() -> None:
         postgresql_using="gist",
         postgresql_ops={},
     )
+    # noinspection SpellCheckingInspection
     op.create_geospatial_table(
         "oilgas_wells",
         sa.Column("id", sa.BigInteger(), sa.Identity(always=False), nullable=False),
@@ -171,6 +176,7 @@ def upgrade() -> None:
         sa.PrimaryKeyConstraint("id", name=op.f("pk_oilgas_wells")),
         schema="energy",
     )
+    # noinspection SpellCheckingInspection
     op.create_index(
         op.f("ix_energy_oilgas_wells_state"),
         "oilgas_wells",
@@ -178,6 +184,7 @@ def upgrade() -> None:
         unique=False,
         schema="energy",
     )
+    # noinspection SpellCheckingInspection
     op.create_geospatial_index(
         "oilgas_wells_geom_idx",
         "oilgas_wells",
@@ -372,6 +379,7 @@ def upgrade() -> None:
     op.create_index(
         op.f("ix_hydro_flood_ble_state"), "flood_ble", ["state"], unique=False, schema="hydro"
     )
+    # noinspection SpellCheckingInspection
     op.create_geospatial_table(
         "flood_fema",
         sa.Column("id", sa.BigInteger(), sa.Identity(always=False), nullable=False),
@@ -518,6 +526,7 @@ def upgrade() -> None:
         postgresql_using="gist",
         postgresql_ops={},
     )
+    # noinspection SpellCheckingInspection
     op.create_geospatial_table(
         "wetlands",
         sa.Column("id", sa.BigInteger(), sa.Identity(always=False), nullable=False),
@@ -706,6 +715,7 @@ def upgrade() -> None:
         sa.UniqueConstraint("layer", "state", name=op.f("uq_sources_layer")),
         schema="public",
     )
+    # noinspection SpellCheckingInspection
     op.create_geospatial_table(
         "map_units",
         sa.Column("id", sa.BigInteger(), sa.Identity(always=False), nullable=False),
@@ -1008,6 +1018,7 @@ def downgrade() -> None:
     )
     op.drop_index(op.f("ix_energy_pipelines_state"), table_name="pipelines", schema="energy")
     op.drop_geospatial_table("pipelines", schema="energy")
+    # noinspection SpellCheckingInspection
     op.drop_geospatial_index(
         "oilgas_wells_geom_idx",
         table_name="oilgas_wells",
@@ -1015,8 +1026,11 @@ def downgrade() -> None:
         postgresql_using="gist",
         column_name="geom",
     )
+    # noinspection SpellCheckingInspection
     op.drop_index(op.f("ix_energy_oilgas_wells_state"), table_name="oilgas_wells", schema="energy")
+    # noinspection SpellCheckingInspection
     op.drop_geospatial_table("oilgas_wells", schema="energy")
+    # noinspection SpellCheckingInspection
     op.drop_geospatial_index(
         "nrhp_geom_idx",
         table_name="nrhp",
@@ -1024,7 +1038,9 @@ def downgrade() -> None:
         postgresql_using="gist",
         column_name="geom",
     )
+    # noinspection SpellCheckingInspection
     op.drop_index(op.f("ix_cultural_nrhp_state"), table_name="nrhp", schema="cultural")
+    # noinspection SpellCheckingInspection
     op.drop_geospatial_table("nrhp", schema="cultural")
     op.drop_geospatial_index(
         "markers_geom_idx",
