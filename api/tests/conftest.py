@@ -27,8 +27,8 @@ def reference_engine() -> Iterator[Engine]:
     admin = create_engine(reference_url.set(database="postgres"), isolation_level="AUTOCOMMIT")
 
     with admin.connect() as connection:
-        connection.execute(text(f"DROP DATABASE IF EXISTS {TEST_DATABASE} WITH (FORCE)"))
-        connection.execute(text(f"CREATE DATABASE {TEST_DATABASE}"))
+        connection.execute(text(f"DROP DATABASE IF EXISTS {TEST_DATABASE} WITH (FORCE)"))  # type: ignore[SqlInjection]
+        connection.execute(text(f"CREATE DATABASE {TEST_DATABASE}"))  # type: ignore[SqlInjection]
 
     engine = create_engine(reference_url.set(database=TEST_DATABASE))
     migrate_reference(engine, "head", upgrade=True)
@@ -36,5 +36,5 @@ def reference_engine() -> Iterator[Engine]:
     engine.dispose()
 
     with admin.connect() as connection:
-        connection.execute(text(f"DROP DATABASE {TEST_DATABASE} WITH (FORCE)"))
+        connection.execute(text(f"DROP DATABASE {TEST_DATABASE} WITH (FORCE)"))  # type: ignore[SqlInjection]
     admin.dispose()

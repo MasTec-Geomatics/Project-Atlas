@@ -76,6 +76,7 @@ def run_migrations_offline() -> None:
 
 
 def run_migrations_online() -> None:
+    # noinspection GrazieInspection
     """Run the migrations against the reference database.
 
     Uses the connection in ``config.attributes["connection"]`` when one is given, so the

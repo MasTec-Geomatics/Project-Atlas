@@ -1,21 +1,22 @@
 [project]
-name = "api"
+name = "project-atlas-api"
 version = "0.1.0"
 requires-python = ">=3.14"
 classifiers = [
-  "Programming Language :: Python :: 3 :: Only",
-  "Programming Language :: Python :: 3.14",
-  "Programming Language :: Python :: 3.15",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.14",
+    "Programming Language :: Python :: 3.15",
 ]
 dependencies = [
-  "alembic>=1.20.1",
-  "fastapi[standard]==0.162.7",
-  "geoalchemy2==0.21.0",
-  "psycopg==3.3.9",
-  "python-dotenv>=1.2.4",
-  "sqlalchemy==2.1.8",
-  "structlog>=26.1.0",
-  "uvicorn>=0.54.0",
+    "alembic>=1.20.1",
+    "fastapi[standard]==0.163.1",
+    "geoalchemy2==0.21.0",
+    "psycopg==3.3.9",
+    "pydantic==2.14.3",
+    "python-dotenv>=1.2.4",
+    "sqlalchemy==2.1.8",
+    "structlog>=26.1.0",
+    "uvicorn>=0.54.0",
 ]
 
 [dependency-groups]
@@ -32,25 +33,24 @@ entrypoint = "main:app"
 
 [tool.ruff]
 line-length = 100
-target-version = "py314"
 
 [tool.ruff.lint]
 select = [
-  "E",
-  "W",
-  "F", # pycodestyle + pyflakes basics
-  "I", # import sorting
-  "B", # likely bugs
-  "UP", # modern syntax for 3.14
-  "SIM", # simplifications
-  "N", # naming
-  "S", # security (bandit)
-  "C4", # comprehensions
-  "DTZ", # timezone-naive datetimes
-  "T20", # stray print()
-  "PT", # pytest style
-  "FAST", # FastAPI-specific
-  "RUF", # ruff's own rules
+    "E",
+    "W",
+    "F", # pycodestyle + pyflakes basics
+    "I", # import sorting
+    "B", # likely bugs
+    "UP", # modern syntax for 3.14
+    "SIM", # simplifications
+    "N", # naming
+    "S", # security (bandit)
+    "C4", # comprehensions
+    "DTZ", # timezone-naive datetimes
+    "T20", # stray print()
+    "PT", # pytest style
+    "FAST", # FastAPI-specific
+    "RUF", # ruff's own rules
 ]
 
 [tool.ruff.lint.per-file-ignores]

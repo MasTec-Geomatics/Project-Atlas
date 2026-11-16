@@ -2,6 +2,7 @@ from fastapi import APIRouter, FastAPI
 
 from src.core.config import settings
 from src.core.logging import configure_logging
+from src.core.project import PROJECT_NAME, PROJECT_VERSION
 
 configure_logging(settings.log_level, settings.log_json)
 
@@ -12,7 +13,11 @@ api_v1 = APIRouter(prefix="/api/v1")
 
 @app.get("/api/health")
 def health_check() -> dict[str, str]:
-    return {"status": "OK"}
+    return {
+        "status": "OK",
+        "name": PROJECT_NAME,
+        "version": PROJECT_VERSION,
+    }
 
 
 app.include_router(api_v1)
