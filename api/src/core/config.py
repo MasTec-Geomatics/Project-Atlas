@@ -13,6 +13,7 @@ class Settings(BaseModel):
 
     database_url: PostgresDsn = Field(alias="DATABASE_URL")
     reference_database_url: PostgresDsn = Field(alias="REFERENCE_DATABASE_URL")
+    reference_work_dir: Path = Field(alias="REFERENCE_WORK_DIR")
     api_host: str = Field(alias="API_HOST")
     api_port: int = Field(alias="API_PORT")
     log_level: str = Field(alias="LOG_LEVEL")
