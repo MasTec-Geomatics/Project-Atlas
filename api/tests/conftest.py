@@ -3,9 +3,12 @@
 from collections.abc import Iterator
 
 import pytest
-from sqlalchemy import Engine, create_engine, make_url, text
+from sqlalchemy import Engine, create_engine, delete, make_url, text
 
+from src.app import app
 from src.core.config import settings
+from src.reference.api import get_reference_engine
+from src.reference.models.public import LoadRun, Source
 from tests.migrations import migrate_reference
 
 TEST_DATABASE = "reference_test"
@@ -38,3 +41,24 @@ def reference_engine() -> Iterator[Engine]:
     with admin.connect() as connection:
         connection.execute(text(f"DROP DATABASE {TEST_DATABASE} WITH (FORCE)"))  # type: ignore[SqlInjection]
     admin.dispose()
+
+
+def empty_sources_and_runs(engine: Engine) -> None:
+    """Delete every ``public.sources`` and ``public.load_runs`` row."""
+    with engine.begin() as connection:
+        connection.execute(delete(Source))
+        connection.execute(delete(LoadRun))
+
+
+@pytest.fixture
+def api_engine(reference_engine: Engine) -> Iterator[Engine]:
+    """Point the API at the reference test database, with no sources or load runs.
+
+    Yields:
+        Engine connected to the reference test database.
+    """
+    app.dependency_overrides[get_reference_engine] = lambda: reference_engine
+    empty_sources_and_runs(reference_engine)
+    yield reference_engine
+    empty_sources_and_runs(reference_engine)
+    app.dependency_overrides.clear()
