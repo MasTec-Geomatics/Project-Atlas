@@ -2,6 +2,7 @@
 
 **Status:** Accepted
 **Date:** 2026-11-09
+**Updated:** 2026-11-17
 
 ## Decision
 
@@ -30,7 +31,7 @@
 
 ### Health Checks
 
-- `GET /api/health`: the process is running.
+- `GET /api/health`: the process is running. Returns `status`, plus the project `name` and `version` read from `api/pyproject.toml`.
 - `GET /api/ready`: the database is reachable.
 
 ### Error Tracking

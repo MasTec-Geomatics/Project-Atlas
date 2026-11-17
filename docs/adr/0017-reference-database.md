@@ -2,6 +2,7 @@
 
 **Status:** Accepted
 **Date:** 2026-11-12
+**Updated:** 2026-11-17
 
 ## Context
 
@@ -18,12 +19,13 @@ The team needs this data before Atlas reaches MVP.
 
 Create a separate database named `reference` on the same PostgreSQL server as `atlas`. This replaces the `reference` schema proposed in the README.
 
-- Layers are grouped into schemas by subject: `hydro`, `cultural`, `environment`, `energy`, `utilities`, `land`, `soils`, and `storage`. Raw downloads land in `staging` before being swapped into the final tables (ADR 0018).
+- Layers are grouped into schemas by subject: `boundaries`, `hydro`, `cultural`, `environment`, `energy`, `utilities`, `land`, `soils`, and `storage`. Every layer table has a `state` column (ADR 0021). Raw downloads land in `staging` before being swapped into the final tables (ADR 0018).
 - Load history (`public.load_runs`) and change checks (`public.source_checks`) live in the `reference` database.
 - Every geometry column is stored in WGS84 (`EPSG:4326`). Loaders reproject on load.
 - Elevation rasters (USGS 3DEP DEMs) are stored as Cloud Optimized GeoTIFFs in AWS S3. Each file is recorded in `storage.raster_assets` with its S3 key, source date, and footprint.
 - The code lives in Atlas as the `src/reference/` domain.
 - Tables are SQLAlchemy models on a second declarative base, `ReferenceBase`, using the naming convention from ADR 0015.
+- Models are split into one file per schema in `src/reference/models/`, for example `src/reference/models/hydro.py`.
 - The `reference` database has its own Alembic environment, `migrations_reference/`, configured in the `[reference]` section of `alembic.ini`:
 
 ```sh
@@ -37,7 +39,8 @@ Create a separate database named `reference` on the same PostgreSQL server as `a
 
 - Bulk loads cannot affect Atlas data.
 - QGIS users are granted access to `reference` only and never see `atlas`.
-- Managed cluster backups cover both databases together. A single database can be backed up on its own with `pg_dump`.- One server to run.
+- Managed cluster backups cover both databases together. A single database can be backed up on its own with `pg_dump`.
+- One server to run.
 - A single SQL query cannot join tables across the two databases. Atlas code reads reference data through its own connection.
 - Atlas has two database connections: `DATABASE_URL` and `REFERENCE_DATABASE_URL`.
 - Distances and areas are not meaningful in degrees. Measurements use the PostGIS `geography` type or reproject within the query.

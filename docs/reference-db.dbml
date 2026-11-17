@@ -1,12 +1,16 @@
+
 // reference database
 // Public GIS layers, starting with Texas. More states are added as rows, not tables:
-// every layer table has a `state` column, and a load replaces only that state's rows.
+// every layer table has a `state` column, and a load replaces only that state's rows (ADR 0021).
+// National sources are cut at state lines, so unique keys on them include `state`.
 // All geometry stored in WGS84 (EPSG:4326).
 // Spatial indexes are GiST; DBML can't express that type, so they're marked with a note.
+// The `staging` schema holds raw downloads during a load; its tables are created and
+// dropped by each load (ADR 0018), so none are listed here.
 
 Project reference {
   database_type: 'PostgreSQL'
-  Note: 'Read-only for users. Loaded by Geomatics maintainers (ADR 0017, 0018, 0019).'
+  Note: 'Read-only for users. Loaded by Geomatics maintainers (ADR 0017, 0018, 0019, 0021).'
 }
 
 // ---------- public: sources and load bookkeeping ----------
@@ -59,6 +63,71 @@ Table public.source_checks {
   }
 }
 
+Table public.layer_styles {
+  id serial [pk]
+  f_table_catalog varchar
+  f_table_schema varchar
+  f_table_name varchar
+  f_geometry_column varchar
+  stylename text
+  styleqml xml
+  stylesld xml
+  useasdefault boolean
+  description text
+  owner varchar(63) [default: `CURRENT_USER`]
+  ui xml
+  update_time timestamp [default: `CURRENT_TIMESTAMP`]
+  type varchar
+  r_raster_column varchar
+
+  Note: 'Shared QGIS layer styles (ADR 0023). Columns match the table QGIS creates, so QGIS can read and write it; created by a reference migration.'
+}
+
+// ---------- boundaries ----------
+
+Table boundaries.states {
+  id bigint [pk, increment]
+  state text [not null, unique, note: 'Two-letter code, e.g. TX']
+  name text [not null, note: 'e.g. Texas']
+  geom "geometry(MultiPolygon, 4326)" [not null]
+
+  indexes {
+    geom [name: 'states_geom_idx', note: 'GiST']
+  }
+
+  Note: 'Census TIGER/Line, full detail, national state file. Used to cut national sources at state lines.'
+}
+
+Table boundaries.counties {
+  id bigint [pk, increment]
+  state text [not null]
+  geoid text [not null, unique, note: 'Census county GEOID, e.g. 48453']
+  name text [not null, note: 'e.g. Travis']
+  geom "geometry(MultiPolygon, 4326)" [not null]
+
+  indexes {
+    state
+    geom [name: 'counties_geom_idx', note: 'GiST']
+  }
+
+  Note: 'Census TIGER/Line, full detail, national county file.'
+}
+
+Table boundaries.places {
+  id bigint [pk, increment]
+  state text [not null]
+  geoid text [not null, unique, note: 'Census place GEOID']
+  name text [not null, note: 'e.g. Austin']
+  geom "geometry(MultiPolygon, 4326)" [not null]
+
+  indexes {
+    state
+    geom [name: 'places_geom_idx', note: 'GiST']
+  }
+
+  Note: 'Census TIGER/Line, full detail, per-state place file. Cities, towns, villages and Census designated places. No county column: places can cross county lines, so the places in a county are found by spatial overlap.'
+}
+
 // ---------- hydro ----------
 
 Table hydro.wetlands {
@@ -73,18 +142,20 @@ Table hydro.wetlands {
     state
     geom [name: 'wetlands_geom_idx', note: 'GiST']
   }
+
+  Note: 'USFWS NWI. Wetlands only: Freshwater Emergent Wetland, Freshwater Forested/Shrub Wetland, Estuarine and Marine Wetland. Ponds, lakes, streams, ditches, rivers and other open water are never loaded here.'
 }
 
 Table hydro.flowlines {
   id bigint [pk, increment]
   state text [not null]
-  id3dhp text [not null, unique]
+  id3dhp text [not null, note: 'Not unique alone: a feature crossing a state line is stored once per state']
   name text
   feature_type text [not null, note: 'River, Canal (incl. ditches), Drainageway, ...']
   geom "geometry(MultiLineString, 4326)" [not null]
 
   indexes {
-    state
+    (state, id3dhp) [unique]
     geom [name: 'flowlines_geom_idx', note: 'GiST']
   }
 }
@@ -92,13 +163,13 @@ Table hydro.flowlines {
 Table hydro.waterbodies {
   id bigint [pk, increment]
   state text [not null]
-  id3dhp text [not null, unique]
+  id3dhp text [not null, note: 'Not unique alone: a feature crossing a state line is stored once per state']
   name text
   feature_type text [not null]
   geom "geometry(MultiPolygon, 4326)" [not null]
 
   indexes {
-    state
+    (state, id3dhp) [unique]
     geom [name: 'waterbodies_geom_idx', note: 'GiST']
   }
 }
@@ -347,3 +418,4 @@ Table storage.raster_assets {
     footprint [name: 'raster_assets_footprint_idx', note: 'GiST']
   }
 }
+
