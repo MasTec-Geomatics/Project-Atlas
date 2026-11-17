@@ -23,7 +23,7 @@ import subprocess
 import sys
 import tempfile
 import zipfile
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import httpx
@@ -62,6 +62,8 @@ class LayerSource:
         columns: Final column name to staged source field name. ``ogr2ogr`` lowercases
             source field names when it stages them. ``state`` and ``geom`` are filled
             by the framework and are not listed here.
+        keep: Staged source field name to the values to keep. Rows with any other value
+            in that field are not loaded. Empty means every row is loaded.
     """
 
     model: type[ReferenceBase]
@@ -70,6 +72,7 @@ class LayerSource:
     source_layer: str
     file_suffix: str
     columns: dict[str, str]
+    keep: dict[str, tuple[str, ...]] = field(default_factory=dict)
 
 
 def run_load(engine: Engine, source: LayerSource) -> None:
@@ -243,8 +246,8 @@ def swap(engine: Engine, source: LayerSource, table: Table) -> int:
     with engine.begin() as connection:
         staged = Table(table.name, MetaData(), schema=STAGING_SCHEMA, autoload_with=connection)
 
-        expected = [*source.columns.values(), "geom"]
-        missing = [field for field in expected if field not in staged.c]
+        expected = [*source.columns.values(), *source.keep, "geom"]
+        missing = [name for name in expected if name not in staged.c]
         if missing:
             raise LoadError(
                 f"Staged source for {table.fullname} is missing expected fields {missing}. "
@@ -258,9 +261,9 @@ def swap(engine: Engine, source: LayerSource, table: Table) -> int:
                 ["state", *source.columns, "geom"],
                 select(
                     literal(source.state),
-                    *(staged.c[field] for field in source.columns.values()),
+                    *(staged.c[name] for name in source.columns.values()),
                     staged.c.geom,
-                ),
+                ).where(*(staged.c[name].in_(values) for name, values in source.keep.items())),
             )
         )
         rows_loaded = connection.scalar(select(func.count()).select_from(table).where(in_state))

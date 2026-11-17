@@ -20,7 +20,7 @@ from src.reference import load
 from src.reference.load import LoadError
 from src.reference.loaders import wetlands
 
-# Two NWI-style features in EPSG:4326. Plain Polygons, so the test also proves they
+# NWI-style features in EPSG:4326. Plain Polygons, so the test also proves they
 # arrive in the final table as MultiPolygons.
 FEATURES = [
     {
@@ -30,10 +30,23 @@ FEATURES = [
         "ring": [[-97.0, 30.0], [-97.0, 30.01], [-96.99, 30.01], [-96.99, 30.0], [-97.0, 30.0]],
     },
     {
-        "ATTRIBUTE": "PUBHh",
-        "WETLAND_TYPE": "Freshwater Pond",
+        "ATTRIBUTE": "PFO1A",
+        "WETLAND_TYPE": "Freshwater Forested/Shrub Wetland",
         "ACRES": 0.5,
         "ring": [[-98.0, 31.0], [-98.0, 31.01], [-97.99, 31.01], [-97.99, 31.0], [-98.0, 31.0]],
+    },
+    # Open water that NWI also maps. Neither one may be loaded into hydro.wetlands.
+    {
+        "ATTRIBUTE": "PUBHh",
+        "WETLAND_TYPE": "Freshwater Pond",
+        "ACRES": 0.3,
+        "ring": [[-97.5, 30.5], [-97.5, 30.51], [-97.49, 30.51], [-97.49, 30.5], [-97.5, 30.5]],
+    },
+    {
+        "ATTRIBUTE": "R4SBC",
+        "WETLAND_TYPE": "Riverine",
+        "ACRES": 0.2,
+        "ring": [[-97.4, 30.6], [-97.4, 30.61], [-97.39, 30.61], [-97.39, 30.6], [-97.4, 30.6]],
     },
 ]
 
@@ -138,11 +151,23 @@ def test_load_fills_table_with_mapped_columns(reference_engine: Engine, served: 
     rows = wetland_rows(reference_engine)
     assert [(r.state, r.cowardin_code, r.wetland_type, float(r.acres)) for r in rows] == [
         ("TX", "PEM1C", "Freshwater Emergent Wetland", 1.25),
-        ("TX", "PUBHh", "Freshwater Pond", 0.5),
+        ("TX", "PFO1A", "Freshwater Forested/Shrub Wetland", 0.5),
     ]
     assert {(r.geom_type, r.srid) for r in rows} == {("MULTIPOLYGON", 4326)}
     assert rows[0].lon == pytest.approx(-96.995, abs=1e-6)
     assert rows[0].lat == pytest.approx(30.005, abs=1e-6)
+
+
+@pytest.mark.usefixtures("clean_tables")
+def test_open_water_is_not_loaded(reference_engine: Engine, served: Path) -> None:
+    """Ponds and streams in the NWI download are left out of hydro.wetlands."""
+    write_download(served)
+
+    wetlands.load_wetlands(reference_engine)
+
+    loaded_types = {row.wetland_type for row in wetland_rows(reference_engine)}
+    assert "Freshwater Pond" not in loaded_types
+    assert "Riverine" not in loaded_types
 
 
 @pytest.mark.usefixtures("clean_tables")
