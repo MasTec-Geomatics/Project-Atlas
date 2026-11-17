@@ -3,12 +3,14 @@ from fastapi import APIRouter, FastAPI
 from src.core.config import settings
 from src.core.logging import configure_logging
 from src.core.project import PROJECT_NAME, PROJECT_VERSION
+from src.reference.api import router as reference_router
 
 configure_logging(settings.log_level, settings.log_json)
 
 app = FastAPI(title="Project Atlas")
 
 api_v1 = APIRouter(prefix="/api/v1")
+api_v1.include_router(reference_router)
 
 
 @app.get("/api/health")

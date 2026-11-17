@@ -5,6 +5,9 @@ Source page: https://www.fws.gov/program/national-wetlands-inventory/download-st
 Attributes:
     SOURCES: State code to the USFWS state GeoPackage download.
     COLUMNS: ``hydro.wetlands`` column to NWI source field (lowercased by ``ogr2ogr``).
+    WETLAND_TYPES: The NWI ``WETLAND_TYPE`` values that are wetlands. NWI also maps open
+        water (for example ``Freshwater Pond``, ``Lake``, ``Riverine`` and ``Estuarine and
+        Marine Deepwater``); only the values listed here are loaded.
 """
 
 from sqlalchemy import Engine
@@ -22,9 +25,15 @@ COLUMNS = {
     "acres": "acres",  # NWI ACRES
 }
 
+WETLAND_TYPES = (
+    "Freshwater Emergent Wetland",
+    "Freshwater Forested/Shrub Wetland",
+    "Estuarine and Marine Wetland",
+)
+
 
 def load_wetlands(engine: Engine) -> None:
-    """Load NWI wetland polygons into ``hydro.wetlands`` for each state in ``SOURCES``.
+    """Load NWI wetlands, without open water, into ``hydro.wetlands`` for each state.
 
     Args:
         engine: Engine for the reference database.
@@ -37,5 +46,6 @@ def load_wetlands(engine: Engine) -> None:
             source_layer=f"{state}_Wetlands",
             file_suffix=".gpkg",
             columns=COLUMNS,
+            keep={"wetland_type": WETLAND_TYPES},
         )
         run_load(engine, source)
