@@ -234,24 +234,3 @@ def test_failed_download_is_recorded(reference_engine: Engine, served: Path) -> 
         wetlands.load_wetlands(reference_engine)
 
     assert latest_run(reference_engine).status == "failed"
-
-
-@pytest.mark.usefixtures("clean_tables")
-def test_main_exit_codes(
-    reference_engine: Engine, served: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """The command exits 0 when the load succeeds and 1 when it fails."""
-    monkeypatch.setattr(load, "reference_engine", reference_engine)
-
-    assert load.main(["wetlands"]) == 1  # nothing served yet
-
-    write_download(served)
-    assert load.main(["wetlands"]) == 0
-
-
-def test_main_rejects_unknown_layer() -> None:
-    """An unknown layer name exits with argparse's usage error code."""
-    with pytest.raises(SystemExit) as exit_info:
-        load.main(["not_a_layer"])
-
-    assert exit_info.value.code == 2

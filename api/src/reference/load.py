@@ -1,8 +1,6 @@
 """Load one reference layer (ADR 0018).
 
-Run from ``api/``::
-
-    uv run python -m src.reference.load wetlands
+Loads are started through the API (``POST /api/v1/reference/loads/{layer}``).
 
 Every layer goes through the same four steps:
 
@@ -16,11 +14,9 @@ A layer's loader in ``src/reference/loaders/`` only supplies what is different a
 it, as a ``LayerSource``.
 """
 
-import argparse
 import os
 import shutil
 import subprocess
-import sys
 import tempfile
 import zipfile
 from dataclasses import dataclass, field
@@ -33,8 +29,7 @@ from sqlalchemy import Engine, MetaData, Table, delete, func, insert, literal, s
 from sqlalchemy.orm import Session
 
 from src.core.config import settings
-from src.core.database import ReferenceBase, reference_engine
-from src.core.logging import configure_logging
+from src.core.database import ReferenceBase
 from src.reference.models.public import LoadRun
 
 log = structlog.get_logger(__name__)
@@ -62,8 +57,8 @@ class LayerSource:
         columns: Final column name to staged source field name. ``ogr2ogr`` lowercases
             source field names when it stages them. ``state`` and ``geom`` are filled
             by the framework and are not listed here.
-        keep: Staged source field name to the values to keep. Rows with any other value
-            in that field are not loaded. Empty means every row is loaded.
+        keep: Final column name to the values to load. Staged rows with any other value
+            in that column are left out. Empty loads every row.
     """
 
     model: type[ReferenceBase]
@@ -246,7 +241,7 @@ def swap(engine: Engine, source: LayerSource, table: Table) -> int:
     with engine.begin() as connection:
         staged = Table(table.name, MetaData(), schema=STAGING_SCHEMA, autoload_with=connection)
 
-        expected = [*source.columns.values(), *source.keep, "geom"]
+        expected = [*source.columns.values(), "geom"]
         missing = [name for name in expected if name not in staged.c]
         if missing:
             raise LoadError(
@@ -254,18 +249,18 @@ def swap(engine: Engine, source: LayerSource, table: Table) -> int:
                 f"The source may have changed; the final table was not touched."
             )
 
+        kept = (
+            staged.c[source.columns[column]].in_(values) for column, values in source.keep.items()
+        )
+        rows = select(
+            literal(source.state),
+            *(staged.c[name] for name in source.columns.values()),
+            staged.c.geom,
+        ).where(*kept)
+
         in_state = table.c.state == source.state
         connection.execute(delete(table).where(in_state))
-        connection.execute(
-            insert(table).from_select(
-                ["state", *source.columns, "geom"],
-                select(
-                    literal(source.state),
-                    *(staged.c[name] for name in source.columns.values()),
-                    staged.c.geom,
-                ).where(*(staged.c[name].in_(values) for name, values in source.keep.items())),
-            )
-        )
+        connection.execute(insert(table).from_select(["state", *source.columns, "geom"], rows))
         rows_loaded = connection.scalar(select(func.count()).select_from(table).where(in_state))
         staged.drop(connection)
         return rows_loaded or 0
@@ -302,35 +297,3 @@ def finish_run(
                 finished_at=func.now(),
             )
         )
-
-
-def main(argv: list[str] | None = None) -> int:
-    """Run one layer's loader.
-
-    Args:
-        argv: Command-line arguments; defaults to ``sys.argv``.
-
-    Returns:
-        0 when the load succeeded, 1 when it failed.
-    """
-    # Imported here: each loader imports this module, so a top-level import would loop.
-    from src.reference.loaders import LOADERS
-
-    parser = argparse.ArgumentParser(
-        prog="python -m src.reference.load",
-        description="Load one reference layer into the reference database.",
-    )
-    parser.add_argument("layer", choices=sorted(LOADERS))
-    args = parser.parse_args(argv)
-
-    configure_logging(settings.log_level, settings.log_json)
-    # noinspection broad-exception
-    try:
-        LOADERS[args.layer](reference_engine)
-    except Exception:
-        return 1
-    return 0
-
-
-if __name__ == "__main__":
-    sys.exit(main())
