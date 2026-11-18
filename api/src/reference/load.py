@@ -1,6 +1,11 @@
 """Load one reference layer (ADR 0018).
 
-Loads are started through the API (``POST /api/v1/reference/loads/{layer}``).
+Loads are started through the API (ADR 0018):
+
+- ``POST /api/v1/reference/loads/{layer}`` loads every enabled state of a layer.
+- ``POST /api/v1/reference/loads/{layer}/{state}`` loads one state.
+
+Download links come from ``public.sources``, one row per layer and state (ADR 0021).
 
 Every layer goes through the same four steps:
 
@@ -11,7 +16,7 @@ Every layer goes through the same four steps:
 4. Record the run in ``public.load_runs``.
 
 A layer's loader in ``src/reference/loaders/`` only supplies what is different about
-it, as a ``LayerSource``.
+it: a ``Loader`` that turns a ``public.sources`` row into a ``LayerSource``.
 """
 
 import os
@@ -19,6 +24,7 @@ import shutil
 import subprocess
 import tempfile
 import zipfile
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -30,7 +36,7 @@ from sqlalchemy.orm import Session
 
 from src.core.config import settings
 from src.core.database import ReferenceBase
-from src.reference.models.public import LoadRun
+from src.reference.models.public import LoadRun, Source
 
 log = structlog.get_logger(__name__)
 
@@ -68,6 +74,62 @@ class LayerSource:
     file_suffix: str
     columns: dict[str, str]
     keep: dict[str, tuple[str, ...]] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class Loader:
+    """One layer's loader.
+
+    Attributes:
+        model: Final table model, such as ``Wetland``.
+        layer_source: Builds the ``LayerSource`` for one ``public.sources`` row.
+    """
+
+    model: type[ReferenceBase]
+    layer_source: Callable[[Source], LayerSource]
+
+    @property
+    def layer(self) -> str:
+        """The layer name used in ``public.sources``, such as ``hydro.wetlands``."""
+        return final_table(self.model).fullname
+
+
+def enabled_sources(engine: Engine, layer: str, state: str | None = None) -> list[Source]:
+    """Return a layer's enabled ``public.sources`` rows, ordered by state.
+
+    Args:
+        engine: Engine for the reference database.
+        layer: Layer name, such as ``hydro.wetlands``.
+        state: Two-letter state code to return only that state's row. ``None`` returns
+            every enabled state.
+
+    Returns:
+        The enabled sources.
+    """
+    query = (
+        select(Source)
+        .where(Source.layer == layer, Source.is_enabled.is_(True))
+        .order_by(Source.state)
+    )
+    if state is not None:
+        query = query.where(Source.state == state)
+    with Session(engine) as session:
+        return list(session.scalars(query))
+
+
+def run_loads(engine: Engine, sources: Sequence[LayerSource]) -> None:
+    """Load each source in order, one state at a time.
+
+    Args:
+        engine: Engine for the reference database.
+        sources: The layer and state of each load.
+
+    Raises:
+        LoadError: A load failed. It is recorded as ``failed``, and the states after it
+            are not loaded.
+    """
+    for source in sources:
+        run_load(engine, source)
 
 
 def run_load(engine: Engine, source: LayerSource) -> None:
