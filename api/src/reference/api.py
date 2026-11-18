@@ -1,7 +1,7 @@
 """Reference database endpoints.
 
-- ``/loads``: start loads. The admin page's Load buttons call these; until that page
-  exists, they are run from the API's ``/docs`` page.
+- ``/loads``: start loads. The admin page's Load button calls this; until that page
+  exists, it is run from the API's ``/docs`` page.
 - ``/sources``: add, list, and edit the download links in ``public.sources``.
 """
 
@@ -11,14 +11,14 @@ from typing import Annotated
 
 import httpx
 import structlog
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Path, status
+from fastapi import APIRouter, BackgroundTasks, Body, Depends, HTTPException, status
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import Engine, func, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from src.core.database import reference_engine
-from src.reference.load import LayerSource, Loader, LoadError, enabled_sources, run_loads
+from src.reference.load import LayerSource, LoadError, enabled_sources, run_loads
 from src.reference.loaders import LOADERS
 from src.reference.models.public import Source
 from src.reference.state_codes import STATE_FIPS
@@ -30,19 +30,27 @@ router = APIRouter(prefix="/reference", tags=["reference"])
 STATE_PATTERN = r"^[A-Z]{2}$"
 URL_PATTERN = r"^https?://"
 
-State = Annotated[str, Path(pattern=STATE_PATTERN, description="Two-letter code, e.g. TX")]
 
-
-class LoadStarted(BaseModel):
-    """Response when a load has been started.
+class LoadRequest(BaseModel):
+    """One layer and state to load, one checked box on the admin page.
 
     Attributes:
-        layer: The layer being loaded, such as ``wetlands``.
-        states: The states being loaded, in load order.
+        layer: Layer name, such as ``wetlands``.
+        state: Two-letter state code, such as ``TX``.
     """
 
     layer: str
-    states: list[str]
+    state: str = Field(pattern=STATE_PATTERN)
+
+
+class LoadsStarted(BaseModel):
+    """Response when loads have been started.
+
+    Attributes:
+        loads: The layer and state pairs being loaded.
+    """
+
+    loads: list[LoadRequest]
 
 
 class SourceCreate(BaseModel):
@@ -121,100 +129,69 @@ def get_reference_engine() -> Engine:
 ReferenceEngine = Annotated[Engine, Depends(get_reference_engine)]
 
 
-def get_loader(layer: str) -> Loader:
-    """Return the loader for a layer route name.
-
-    Raises:
-        HTTPException: 404 when there is no loader for the layer.
-    """
-    loader = LOADERS.get(layer)
-    if loader is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, f"No loader for layer '{layer}'")
-    return loader
-
-
-def run_background_loads(layer: str, engine: Engine, sources: Sequence[LayerSource]) -> None:
-    """Run a layer's loads in the background.
+def run_background_loads(engine: Engine, sources: Sequence[LayerSource]) -> None:
+    """Run the requested loads in the background.
 
     Each load records its outcome in ``public.load_runs`` and logs any failure, so a
     failure is not raised again here.
 
     Args:
-        layer: Layer route name, such as ``wetlands``.
         engine: Engine for the reference database.
-        sources: The loads to run, one per state.
+        sources: The loads to run, one per layer and state.
     """
     try:
         run_loads(engine, sources)
     except LoadError, httpx.HTTPError, OSError, SQLAlchemyError:
-        log.warning("background_load_failed", layer=layer)
-
-
-def start_loads(
-    layer: str, loader: Loader, sources: list[Source], engine: Engine, tasks: BackgroundTasks
-) -> LoadStarted:
-    """Queue the loads for the given sources and describe what was started."""
-    layer_sources = [loader.layer_source(source) for source in sources]
-    tasks.add_task(run_background_loads, layer, engine, layer_sources)
-    return LoadStarted(layer=layer, states=[source.state for source in sources])
-
-
-@router.post("/loads/{layer}", status_code=status.HTTP_202_ACCEPTED)
-def start_layer_load(
-    layer: str, background_tasks: BackgroundTasks, engine: ReferenceEngine
-) -> LoadStarted:
-    """Load every enabled state of a layer. Returns right away; loads run in the background.
-
-    States load one at a time, in state order. Results are recorded in
-    ``public.load_runs``.
-
-    Args:
-        layer: Layer name, such as ``wetlands``.
-        background_tasks: FastAPI's background task list.
-        engine: Engine for the reference database.
-
-    Returns:
-        The layer and the states being loaded.
-
-    Raises:
-        HTTPException: 404 when there is no loader for the layer, or it has no enabled
-            sources.
-    """
-    loader = get_loader(layer)
-    sources = enabled_sources(engine, loader.layer)
-    if not sources:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, f"No enabled sources for {loader.layer}")
-    return start_loads(layer, loader, sources, engine, background_tasks)
-
-
-@router.post("/loads/{layer}/{state}", status_code=status.HTTP_202_ACCEPTED)
-def start_state_load(
-    layer: str, state: State, background_tasks: BackgroundTasks, engine: ReferenceEngine
-) -> LoadStarted:
-    """Load one state of a layer. Returns right away; the load runs in the background.
-
-    The result is recorded in ``public.load_runs``.
-
-    Args:
-        layer: Layer name, such as ``wetlands``.
-        state: Two-letter state code, such as ``TX``.
-        background_tasks: FastAPI's background task list.
-        engine: Engine for the reference database.
-
-    Returns:
-        The layer and the state being loaded.
-
-    Raises:
-        HTTPException: 404 when there is no loader for the layer, or no enabled source
-            for the state.
-    """
-    loader = get_loader(layer)
-    sources = enabled_sources(engine, loader.layer, state)
-    if not sources:
-        raise HTTPException(
-            status.HTTP_404_NOT_FOUND, f"No enabled source for {loader.layer} in {state}"
+        log.warning(
+            "background_load_failed",
+            loads=[f"{source.model.__tablename__}:{source.state}" for source in sources],
         )
-    return start_loads(layer, loader, sources, engine, background_tasks)
+
+
+@router.post("/loads", status_code=status.HTTP_202_ACCEPTED)
+def start_loads(
+    body: Annotated[list[LoadRequest], Body(min_length=1)],
+    background_tasks: BackgroundTasks,
+    engine: ReferenceEngine,
+) -> LoadsStarted:
+    """Load a list of layer and state pairs. Returns right away; loads run in the background.
+
+    Pairs that share a download link, such as several states from one national file, are
+    loaded from a single download. Results are recorded in ``public.load_runs``, one row
+    per layer and state.
+
+    Args:
+        body: The layer and state pairs to load. Repeated pairs are loaded once.
+        background_tasks: FastAPI's background task list.
+        engine: Engine for the reference database.
+
+    Returns:
+        The layer and state pairs being loaded.
+
+    Raises:
+        HTTPException: 422 listing every pair that has no loader or no enabled source.
+            Nothing is started when any pair has a problem.
+    """
+    pairs = list(dict.fromkeys((item.layer, item.state) for item in body))
+    problems: list[str] = []
+    layer_sources: list[LayerSource] = []
+
+    for layer, state in pairs:
+        loader = LOADERS.get(layer)
+        if loader is None:
+            problems.append(f"No loader for layer '{layer}'")
+            continue
+        sources = enabled_sources(engine, loader.layer, state)
+        if not sources:
+            problems.append(f"No enabled source for {loader.layer} in {state}")
+            continue
+        layer_sources.append(loader.layer_source(sources[0]))
+
+    if problems:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, problems)
+
+    background_tasks.add_task(run_background_loads, engine, layer_sources)
+    return LoadsStarted(loads=[LoadRequest(layer=layer, state=state) for layer, state in pairs])
 
 
 @router.get("/sources")

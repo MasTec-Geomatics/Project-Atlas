@@ -1,19 +1,16 @@
-"""Load one reference layer (ADR 0018).
+"""Load reference layers (ADR 0018).
 
-Loads are started through the API (ADR 0018):
+Loads are started through the API with ``POST /api/v1/reference/loads``, which takes a
+list of layer and state pairs. Download links come from ``public.sources``, one row per
+layer and state (ADR 0021).
 
-- ``POST /api/v1/reference/loads/{layer}`` loads every enabled state of a layer.
-- ``POST /api/v1/reference/loads/{layer}/{state}`` loads one state.
-
-Download links come from ``public.sources``, one row per layer and state (ADR 0021).
-
-Every layer goes through the same four steps:
+Each download link goes through the same steps, once per link:
 
 1. Download the source file with ``httpx``.
 2. Stage it as-is into the ``staging`` schema with ``ogr2ogr``, reprojected to EPSG:4326.
-3. Swap it into the final table in one transaction. Users see the previous data until
-   the transaction commits.
-4. Record the run in ``public.load_runs``.
+3. Swap each state into the final table in its own transaction. Users see the previous
+   data until that transaction commits.
+4. Record each state's run in ``public.load_runs``.
 
 A layer's loader in ``src/reference/loaders/`` only supplies what is different about
 it: a ``Loader`` that turns a ``public.sources`` row into a ``LayerSource``.
@@ -119,58 +116,85 @@ def enabled_sources(engine: Engine, layer: str, state: str | None = None) -> lis
 
 
 def run_loads(engine: Engine, sources: Sequence[LayerSource]) -> None:
-    """Load each source in order, one state at a time.
+    """Load each source, downloading each link only once.
+
+    Sources that share a download link, such as several states from one national file,
+    are loaded from a single download. Links are loaded in the order they first appear.
 
     Args:
         engine: Engine for the reference database.
         sources: The layer and state of each load.
 
     Raises:
-        LoadError: A load failed. It is recorded as ``failed``, and the states after it
-            are not loaded.
+        LoadError: A load failed. Its states are recorded as ``failed``, and the links
+            after it are not loaded.
     """
+    by_url: dict[str, list[LayerSource]] = {}
     for source in sources:
-        run_load(engine, source)
+        by_url.setdefault(source.url, []).append(source)
+    for url, url_sources in by_url.items():
+        run_download(engine, url, url_sources)
 
 
-def run_load(engine: Engine, source: LayerSource) -> None:
-    """Download, stage, swap, and record one layer for one state.
+def run_download(engine: Engine, url: str, sources: Sequence[LayerSource]) -> None:
+    """Download one link, then stage, swap, and record each source that uses it.
+
+    Each final table is staged once from the download and then swapped in one state at a
+    time. Each state gets its own ``public.load_runs`` row.
 
     Args:
         engine: Engine for the reference database.
-        source: The layer and state to load.
+        url: The download link the sources share.
+        sources: The layer and state loads that use this link.
 
     Raises:
-        LoadError: The download, staging, or swap failed. The run is recorded as
-            ``failed`` and the final table is unchanged.
+        LoadError: The download, staging, or a swap failed. Every state not yet loaded is
+            recorded as ``failed``, and its final table rows are unchanged.
     """
-    table = final_table(source.model)
-    run_id = start_run(engine, table.fullname, source.state)
-    run_log = log.bind(layer=table.fullname, state=source.state, run_id=run_id)
-    run_log.info("load_started", url=source.url)
+    runs = [
+        (source, start_run(engine, final_table(source.model).fullname, source.state))
+        for source in sources
+    ]
+    pending = {run_id for _, run_id in runs}
+    url_log = log.bind(url=url, states=[source.state for source in sources])
+    url_log.info("load_started")
 
     try:
         settings.reference_work_dir.mkdir(parents=True, exist_ok=True)
         with tempfile.TemporaryDirectory(
             prefix="reference-load-", dir=settings.reference_work_dir
         ) as work_dir:
-            dataset, source_version = download(source.url, Path(work_dir), source.file_suffix)
-            stage(engine, source, table, dataset)
-        rows_loaded = swap(engine, source, table)
+            dataset, source_version = download(url, Path(work_dir), sources[0].file_suffix)
+            staged: set[tuple[str, str | None]] = set()
+            for source, run_id in runs:
+                table = final_table(source.model)
+                if (table.fullname, source.source_layer) not in staged:
+                    stage(engine, source, table, dataset)
+                    staged.add((table.fullname, source.source_layer))
+                rows_loaded = swap(engine, source, table)
+                finish_run(
+                    engine,
+                    run_id,
+                    status="succeeded",
+                    source_version=source_version,
+                    rows_loaded=rows_loaded,
+                )
+                pending.discard(run_id)
+                url_log.info(
+                    "load_succeeded",
+                    layer=table.fullname,
+                    state=source.state,
+                    run_id=run_id,
+                    rows_loaded=rows_loaded,
+                    source_version=source_version,
+                )
+        drop_staged(engine, {final_table(source.model) for source in sources})
     except BaseException as error:
-        # BaseException so Ctrl+C is recorded too, instead of leaving a 'running' row.
-        finish_run(engine, run_id, status="failed", error=str(error) or repr(error))
-        run_log.exception("load_failed")
+        # BaseException so Ctrl+C is recorded too, instead of leaving 'running' rows.
+        for run_id in pending:
+            finish_run(engine, run_id, status="failed", error=str(error) or repr(error))
+        url_log.exception("load_failed", failed_run_ids=sorted(pending))
         raise
-
-    finish_run(
-        engine,
-        run_id,
-        status="succeeded",
-        source_version=source_version,
-        rows_loaded=rows_loaded,
-    )
-    run_log.info("load_succeeded", rows_loaded=rows_loaded, source_version=source_version)
 
 
 def final_table(model: type[ReferenceBase]) -> Table:
@@ -291,6 +315,8 @@ def final_geometry_type(table: Table) -> str:
 def swap(engine: Engine, source: LayerSource, table: Table) -> int:
     """Replace the state's rows in the final table with the staged rows, in one transaction.
 
+    The staged table is kept, so other states can be swapped in from it.
+
     Args:
         engine: Engine for the reference database.
         source: The layer being loaded.
@@ -324,8 +350,19 @@ def swap(engine: Engine, source: LayerSource, table: Table) -> int:
         connection.execute(delete(table).where(in_state))
         connection.execute(insert(table).from_select(["state", *source.columns, "geom"], rows))
         rows_loaded = connection.scalar(select(func.count()).select_from(table).where(in_state))
-        staged.drop(connection)
         return rows_loaded or 0
+
+
+def drop_staged(engine: Engine, tables: set[Table]) -> None:
+    """Drop the staged copies of the given final tables, once every state is swapped in.
+
+    Args:
+        engine: Engine for the reference database.
+        tables: The final tables whose ``staging`` copies are dropped.
+    """
+    with engine.begin() as connection:
+        for table in tables:
+            Table(table.name, MetaData(), schema=STAGING_SCHEMA).drop(connection, checkfirst=True)
 
 
 def start_run(engine: Engine, layer: str, state: str) -> int:

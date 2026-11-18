@@ -17,7 +17,7 @@ import pytest
 from sqlalchemy import Engine, TextClause, delete, insert, text
 
 from src.reference import load
-from src.reference.load import Loader, enabled_sources, run_loads
+from src.reference.load import Loader, LoadError, enabled_sources, run_loads
 from src.reference.loaders import LOADERS
 from src.reference.models.boundaries import County, Place, State
 from src.reference.models.public import LoadRun, Source
@@ -204,3 +204,54 @@ def test_places_in_a_county_by_overlap(reference_engine: Engine, server: tuple[P
             "ON ST_Intersects(p.geom, c.geom) WHERE c.name = 'Travis'"
         ),
     ) == [("Austin",)]
+
+
+def test_one_download_for_states_sharing_a_file(
+    reference_engine: Engine, server: tuple[Path, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Two states from the same national file are loaded from a single download."""
+    folder, base_url = server
+    write_shapefile_zip(folder, "tl_2026_us_state", STATES)
+    url = f"{base_url}/tl_2026_us_state.zip"
+    add_source(reference_engine, "boundaries.states", "TX", url)
+    add_source(reference_engine, "boundaries.states", "LA", url)
+
+    downloads: list[str] = []
+    real_download = load.download
+
+    def counting_download(
+        source_url: str, work_dir: Path, file_suffix: str
+    ) -> tuple[Path, str | None]:
+        downloads.append(source_url)
+        return real_download(source_url, work_dir, file_suffix)
+
+    monkeypatch.setitem(vars(load), "download", counting_download)
+
+    load_layer(reference_engine, LOADERS["states"])
+
+    assert downloads == [url]
+    assert rows(
+        reference_engine, text("SELECT state, name FROM boundaries.states ORDER BY state")
+    ) == [("LA", "Louisiana"), ("TX", "Texas")]
+    assert rows(
+        reference_engine,
+        text("SELECT state, status FROM public.load_runs ORDER BY state"),
+    ) == [("LA", "succeeded"), ("TX", "succeeded")]
+
+
+def test_failed_download_fails_every_state_sharing_it(
+    reference_engine: Engine, server: tuple[Path, str]
+) -> None:
+    """When a shared download fails, every state that uses it is recorded as failed."""
+    _, base_url = server
+    url = f"{base_url}/missing.zip"
+    add_source(reference_engine, "boundaries.states", "TX", url)
+    add_source(reference_engine, "boundaries.states", "LA", url)
+
+    with pytest.raises(LoadError, match="404"):
+        load_layer(reference_engine, LOADERS["states"])
+
+    assert rows(
+        reference_engine,
+        text("SELECT state, status FROM public.load_runs ORDER BY state"),
+    ) == [("LA", "failed"), ("TX", "failed")]
