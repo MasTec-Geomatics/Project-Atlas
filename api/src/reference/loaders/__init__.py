@@ -5,8 +5,11 @@ Attributes:
 """
 
 from src.reference.load import Loader
-from src.reference.loaders import wetlands
+from src.reference.loaders import counties, places, states, wetlands
 
 LOADERS: dict[str, Loader] = {
+    "states": states.LOADER,
+    "counties": counties.LOADER,
+    "places": places.LOADER,
     "wetlands": wetlands.LOADER,
 }

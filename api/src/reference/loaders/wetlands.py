@@ -43,10 +43,10 @@ def layer_source(source: Source) -> LayerSource:
         model=Wetland,
         state=source.state,
         url=source.download_url,
-        source_layer=f"{source.state}_Wetlands",
         file_suffix=f".{source.format}",
         columns=COLUMNS,
-        keep={"wetland_type": WETLAND_TYPES},
+        source_layer=f"{source.state}_Wetlands",
+        keep={COLUMNS["wetland_type"]: WETLAND_TYPES},
     )
 
 
