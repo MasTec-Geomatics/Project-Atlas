@@ -21,6 +21,7 @@ from src.core.database import reference_engine
 from src.reference.load import LayerSource, Loader, LoadError, enabled_sources, run_loads
 from src.reference.loaders import LOADERS
 from src.reference.models.public import Source
+from src.reference.state_codes import STATE_FIPS
 
 log = structlog.get_logger(__name__)
 
@@ -243,12 +244,16 @@ def create_source(body: SourceCreate, engine: ReferenceEngine) -> SourceRead:
         The saved source.
 
     Raises:
-        HTTPException: 422 when no loader handles the layer; 409 when the layer already
-            has a source for the state.
+        HTTPException: 422 when no loader handles the layer or the state code is unknown;
+            409 when the layer already has a source for the state.
     """
     if body.layer not in {loader.layer for loader in LOADERS.values()}:
         raise HTTPException(
             status.HTTP_422_UNPROCESSABLE_CONTENT, f"No loader for layer '{body.layer}'"
+        )
+    if body.state not in STATE_FIPS:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT, f"Unknown state code '{body.state}'"
         )
 
     with Session(engine) as session, session.begin():

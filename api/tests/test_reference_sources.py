@@ -80,6 +80,18 @@ def test_create_source_rejects_bad_state(state: str) -> None:
 
 
 @pytest.mark.usefixtures("api_engine")
+def test_create_source_rejects_unknown_state() -> None:
+    """The state must be one of the state codes Atlas knows."""
+    response = client.post(
+        "/api/v1/reference/sources",
+        json={"layer": "hydro.wetlands", "state": "XX", "download_url": TX_URL, "format": "gpkg"},
+    )
+
+    assert response.status_code == 422
+    assert response.json() == {"detail": "Unknown state code 'XX'"}
+
+
+@pytest.mark.usefixtures("api_engine")
 def test_create_source_rejects_non_http_url() -> None:
     """The download link must be an http or https URL."""
     response = client.post(

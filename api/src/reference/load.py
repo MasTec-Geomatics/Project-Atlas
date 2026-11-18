@@ -58,21 +58,22 @@ class LayerSource:
         model: Final table model, such as ``Wetland``.
         state: Two-letter state code, such as ``TX``.
         url: Download link for the source file.
-        source_layer: Layer name inside the downloaded file, such as ``TX_Wetlands``.
         file_suffix: Suffix of the dataset inside a downloaded zip, such as ``.gpkg``.
         columns: Final column name to staged source field name. ``ogr2ogr`` lowercases
             source field names when it stages them. ``state`` and ``geom`` are filled
             by the framework and are not listed here.
-        keep: Final column name to the values to load. Staged rows with any other value
-            in that column are left out. Empty loads every row.
+        source_layer: Layer name inside the downloaded file, such as ``TX_Wetlands``.
+            ``None`` stages the file's only layer, as with a shapefile.
+        keep: Staged source field name to the values to load. Staged rows with any other
+            value in that field are left out. Empty loads every row.
     """
 
     model: type[ReferenceBase]
     state: str
     url: str
-    source_layer: str
     file_suffix: str
     columns: dict[str, str]
+    source_layer: str | None = None
     keep: dict[str, tuple[str, ...]] = field(default_factory=dict)
 
 
@@ -234,13 +235,14 @@ def stage(engine: Engine, source: LayerSource, table: Table, dataset: Path) -> N
     connection = (
         f"PG:host={url.host} port={url.port or 5432} dbname={url.database} user={url.username}"
     )
+    layer = [] if source.source_layer is None else [source.source_layer]
     run_ogr2ogr(
         [
             "-f",
             "PostgreSQL",
             connection,
             str(dataset),
-            source.source_layer,
+            *layer,
             "-nln",
             f"{STAGING_SCHEMA}.{table.name}",
             "-overwrite",
@@ -303,7 +305,7 @@ def swap(engine: Engine, source: LayerSource, table: Table) -> int:
     with engine.begin() as connection:
         staged = Table(table.name, MetaData(), schema=STAGING_SCHEMA, autoload_with=connection)
 
-        expected = [*source.columns.values(), "geom"]
+        expected = [*source.columns.values(), *source.keep, "geom"]
         missing = [name for name in expected if name not in staged.c]
         if missing:
             raise LoadError(
@@ -311,9 +313,7 @@ def swap(engine: Engine, source: LayerSource, table: Table) -> int:
                 f"The source may have changed; the final table was not touched."
             )
 
-        kept = (
-            staged.c[source.columns[column]].in_(values) for column, values in source.keep.items()
-        )
+        kept = (staged.c[name].in_(values) for name, values in source.keep.items())
         rows = select(
             literal(source.state),
             *(staged.c[name] for name in source.columns.values()),

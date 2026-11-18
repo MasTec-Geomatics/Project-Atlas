@@ -13,9 +13,10 @@ DBML = (Path(__file__).resolve().parents[2] / "docs" / "reference-db.dbml").read
 
 # Every table and every GiST index name, read from the DBML so the tests follow it.
 TABLES = re.findall(r"^Table (\w+\.\w+) \{", DBML, flags=re.MULTILINE)
-GIST_INDEXES = re.findall(r"\[name: '(\w+)', note: 'GiST'\]", DBML)
+GIST_INDEXES = re.findall(r"\[name: '(\w+)', note: 'GiST']", DBML)
 
 SCHEMAS = [
+    "boundaries",
     "hydro",
     "cultural",
     "environment",

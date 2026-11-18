@@ -10,6 +10,7 @@ Attributes:
 
 from src.core.database import ReferenceBase
 from src.reference.models import (
+    boundaries,
     cultural,
     energy,
     environment,
@@ -22,6 +23,7 @@ from src.reference.models import (
 )
 
 __all__ = [
+    "boundaries",
     "cultural",
     "energy",
     "environment",
