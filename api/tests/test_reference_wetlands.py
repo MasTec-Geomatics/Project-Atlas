@@ -14,11 +14,13 @@ from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 import pytest
-from sqlalchemy import Engine, Row, text
+from sqlalchemy import Engine, Row, delete, insert, text
 
 from src.reference import load
-from src.reference.load import LoadError
+from src.reference.load import LoadError, enabled_sources, run_loads
 from src.reference.loaders import wetlands
+from src.reference.models.hydro import Wetland
+from src.reference.models.public import LoadRun, Source
 
 # NWI-style features in EPSG:4326. Plain Polygons, so the test also proves they
 # arrive in the final table as MultiPolygons.
@@ -84,8 +86,23 @@ def write_download(directory: Path, *, drop_field: str | None = None) -> None:
 
 
 @pytest.fixture
-def served(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
-    """Serve ``tmp_path`` over HTTP and point the wetlands loader at it.
+def clean_tables(reference_engine: Engine) -> Iterator[None]:
+    """Empty the tables these tests write to, before and after each test."""
+
+    def empty() -> None:
+        with reference_engine.begin() as connection:
+            connection.execute(delete(Wetland))
+            connection.execute(delete(LoadRun))
+            connection.execute(delete(Source))
+
+    empty()
+    yield
+    empty()
+
+
+@pytest.fixture
+def served(tmp_path: Path, reference_engine: Engine, clean_tables: None) -> Iterator[Path]:
+    """Serve ``tmp_path`` over HTTP and add it as the TX source in ``public.sources``.
 
     Yields:
         The served folder; tests write the download into it.
@@ -96,26 +113,22 @@ def served(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
     thread.start()
 
     url = f"http://127.0.0.1:{server.server_port}/TX_geopackage_wetlands.zip"
-    monkeypatch.setattr(wetlands, "SOURCES", {"TX": url})
+    with reference_engine.begin() as connection:
+        connection.execute(
+            insert(Source).values(
+                layer="hydro.wetlands", state="TX", download_url=url, format="gpkg"
+            )
+        )
     yield tmp_path
 
     server.shutdown()
     server.server_close()
 
 
-@pytest.fixture
-def clean_tables(reference_engine: Engine) -> Iterator[None]:
-    """Empty the tables these tests write to, before and after each test."""
-
-    # noinspection SqlWithoutWhere
-    def empty() -> None:
-        with reference_engine.begin() as connection:
-            connection.execute(text("DELETE FROM hydro.wetlands"))
-            connection.execute(text("DELETE FROM public.load_runs"))
-
-    empty()
-    yield
-    empty()
+def load_wetlands(engine: Engine) -> None:
+    """Load every enabled wetlands source, the way the load endpoint does."""
+    sources = enabled_sources(engine, wetlands.LOADER.layer)
+    run_loads(engine, [wetlands.LOADER.layer_source(source) for source in sources])
 
 
 def latest_run(engine: Engine) -> Row:
@@ -141,12 +154,11 @@ def wetland_rows(engine: Engine) -> list[Row]:
         )
 
 
-@pytest.mark.usefixtures("clean_tables")
 def test_load_fills_table_with_mapped_columns(reference_engine: Engine, served: Path) -> None:
     """A load maps NWI fields to the final columns as 4326 MultiPolygons."""
     write_download(served)
 
-    wetlands.load_wetlands(reference_engine)
+    load_wetlands(reference_engine)
 
     rows = wetland_rows(reference_engine)
     assert [(r.state, r.cowardin_code, r.wetland_type, float(r.acres)) for r in rows] == [
@@ -158,24 +170,22 @@ def test_load_fills_table_with_mapped_columns(reference_engine: Engine, served: 
     assert rows[0].lat == pytest.approx(30.005, abs=1e-6)
 
 
-@pytest.mark.usefixtures("clean_tables")
 def test_open_water_is_not_loaded(reference_engine: Engine, served: Path) -> None:
     """Ponds and streams in the NWI download are left out of hydro.wetlands."""
     write_download(served)
 
-    wetlands.load_wetlands(reference_engine)
+    load_wetlands(reference_engine)
 
     loaded_types = {row.wetland_type for row in wetland_rows(reference_engine)}
     assert "Freshwater Pond" not in loaded_types
     assert "Riverine" not in loaded_types
 
 
-@pytest.mark.usefixtures("clean_tables")
 def test_load_records_succeeded_run(reference_engine: Engine, served: Path) -> None:
     """A good load is recorded as succeeded with its row count and source version."""
     write_download(served)
 
-    wetlands.load_wetlands(reference_engine)
+    load_wetlands(reference_engine)
 
     run = latest_run(reference_engine)
     assert (run.layer, run.state, run.status) == ("hydro.wetlands", "TX", "succeeded")
@@ -185,40 +195,37 @@ def test_load_records_succeeded_run(reference_engine: Engine, served: Path) -> N
     assert run.finished_at is not None
 
 
-@pytest.mark.usefixtures("clean_tables")
 def test_reload_replaces_rows(reference_engine: Engine, served: Path) -> None:
     """Loading again replaces the state's rows instead of adding to them."""
     write_download(served)
 
-    wetlands.load_wetlands(reference_engine)
-    wetlands.load_wetlands(reference_engine)
+    load_wetlands(reference_engine)
+    load_wetlands(reference_engine)
 
     assert len(wetland_rows(reference_engine)) == 2
 
 
-@pytest.mark.usefixtures("clean_tables")
 def test_staging_table_is_dropped_after_swap(reference_engine: Engine, served: Path) -> None:
     """The raw staged copy is removed once the final table has the data."""
     write_download(served)
 
-    wetlands.load_wetlands(reference_engine)
+    load_wetlands(reference_engine)
 
     with reference_engine.connect() as connection:
         staged = connection.scalar(text("SELECT to_regclass('staging.wetlands')"))
     assert staged is None
 
 
-@pytest.mark.usefixtures("clean_tables")
 def test_missing_field_fails_and_keeps_previous_data(
     reference_engine: Engine, served: Path
 ) -> None:
     """A source missing an expected field fails loudly and leaves the final table alone."""
     write_download(served)
-    wetlands.load_wetlands(reference_engine)
+    load_wetlands(reference_engine)
 
     write_download(served, drop_field="WETLAND_TYPE")
     with pytest.raises(LoadError, match="wetland_type"):
-        wetlands.load_wetlands(reference_engine)
+        load_wetlands(reference_engine)
 
     assert len(wetland_rows(reference_engine)) == 2
     run = latest_run(reference_engine)
@@ -227,10 +234,9 @@ def test_missing_field_fails_and_keeps_previous_data(
     assert run.finished_at is not None
 
 
-@pytest.mark.usefixtures("clean_tables")
 def test_failed_download_is_recorded(reference_engine: Engine, served: Path) -> None:
     """A download error (here a 404, nothing written to the served folder) is recorded."""
     with pytest.raises(LoadError, match="404"):
-        wetlands.load_wetlands(reference_engine)
+        load_wetlands(reference_engine)
 
     assert latest_run(reference_engine).status == "failed"
