@@ -1,4 +1,4 @@
-"""Tests for the reference migrations (issue #68, ADR 0017)."""
+"""Tests for the reference migration (ADR 0017)."""
 
 import re
 from pathlib import Path
@@ -29,6 +29,12 @@ SCHEMAS = [
 ]
 LAYER_SCHEMAS = [schema for schema in SCHEMAS if schema != "staging"]
 LOAD_RUN_STATUSES = ["running", "succeeded", "failed"]
+STARTING_LAYERS = [
+    "boundaries.counties",
+    "boundaries.places",
+    "boundaries.states",
+    "hydro.wetlands",
+]
 
 
 def test_postgis_extension_exists(reference_engine: Engine) -> None:
@@ -75,6 +81,50 @@ def test_spatial_index_is_gist(reference_engine: Engine, index_name: str) -> Non
 
     assert definition is not None
     assert "USING gist" in definition
+
+
+def test_sources_columns(reference_engine: Engine) -> None:
+    """public.sources has the columns from the DBML."""
+    columns = inspect(reference_engine).get_columns("sources", schema="public")
+
+    assert [column["name"] for column in columns] == [
+        "id",
+        "layer",
+        "state",
+        "download_url",
+        "access_type",
+        "format",
+        "source_layer",
+        "field_mapping",
+        "keep",
+        "clip_to_state",
+        "license",
+        "attribution",
+        "is_enabled",
+        "updated_at",
+    ]
+
+
+def test_one_federal_source_per_layer(reference_engine: Engine) -> None:
+    """A layer can't have two federal sources: the unique key treats empty states as equal."""
+    insert = text(
+        "INSERT INTO public.sources (layer, download_url, access_type, format, field_mapping) "
+        "VALUES ('test.layer', 'https://example.com/a.zip', 'file', 'GPKG', '{}')"
+    )
+    with reference_engine.connect() as connection:
+        connection.execute(insert)
+        with pytest.raises(IntegrityError):
+            connection.execute(insert)
+
+
+def test_sources_rejects_unknown_access_type(reference_engine: Engine) -> None:
+    """The access_type check constraint allows only file and service."""
+    insert = text(
+        "INSERT INTO public.sources (layer, download_url, access_type, format, field_mapping) "
+        "VALUES ('test.layer', 'https://example.com/a.zip', 'ftp', 'GPKG', '{}')"
+    )
+    with reference_engine.connect() as connection, pytest.raises(IntegrityError):
+        connection.execute(insert)
 
 
 def test_source_checks_columns(reference_engine: Engine) -> None:
@@ -214,14 +264,19 @@ def test_future_tables_get_grants(reference_engine: Engine, schema: str) -> None
     assert maintainer
 
 
-def test_downgrade_to_base_removes_schemas(reference_engine: Engine) -> None:
-    """Downgrading to base removes the schemas and load_runs; upgrading restores them."""
+def test_downgrade_and_upgrade(reference_engine: Engine) -> None:
+    """Downgrading removes every schema; upgrading restores them with the starting sources."""
     migrate_reference(reference_engine, "base", upgrade=False)
     inspector = inspect(reference_engine)
     schemas_left = set(SCHEMAS) & set(inspector.get_schema_names())
-    load_runs_left = inspector.has_table("load_runs", schema="public")
+    sources_left = inspector.has_table("sources", schema="public")
 
     migrate_reference(reference_engine, "head", upgrade=True)
+    with reference_engine.connect() as connection:
+        starting = connection.execute(
+            text("SELECT layer, state FROM public.sources ORDER BY layer")
+        ).all()
 
     assert schemas_left == set()
-    assert not load_runs_left
+    assert not sources_left
+    assert [tuple(row) for row in starting] == [(layer, None) for layer in STARTING_LAYERS]

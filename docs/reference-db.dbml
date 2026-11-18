@@ -1,4 +1,3 @@
-
 // reference database
 // Public GIS layers, starting with Texas. More states are added as rows, not tables:
 // every layer table has a `state` column, and a load replaces only that state's rows (ADR 0021).
@@ -17,20 +16,25 @@ Project reference {
 
 Table public.sources {
   id bigint [pk, increment]
-  layer text [not null, note: 'e.g. hydro.wetlands']
-  state text [not null, note: 'Two-letter code, e.g. TX']
-  download_url text [not null]
-  format text [not null, note: 'e.g. gpkg, shp, gdb, osm.pbf']
+  layer text [not null, note: 'e.g. boundaries.places']
+  state text [note: 'Empty: federal source, covers every state. Set (e.g. TX): covers only that state']
+  download_url text [not null, note: 'Can contain {fips} and {state}, filled in for each state at load time']
+  access_type text [not null, note: "check: 'file' | 'service'"]
+  format text [not null, note: 'ogrinfo driver name, e.g. ESRI Shapefile, GPKG']
+  source_layer text [note: 'Layer name inside the file, can contain {state}. Empty: the file has one layer']
+  field_mapping jsonb [not null, note: 'Column to provider field, e.g. {"name": "NAME"}']
+  keep jsonb [note: 'Provider field to the values to keep, e.g. {"WETLAND_TYPE": ["Riverine"]}. Empty: keep every row']
+  clip_to_state boolean [not null, default: false, note: 'Cut the data at the state line using boundaries.states']
   license text
   attribution text
   is_enabled boolean [not null, default: true]
   updated_at timestamptz [not null, default: `now()`]
 
   indexes {
-    (layer, state) [unique]
+    (layer, state) [unique, note: 'NULLS NOT DISTINCT: one federal source per layer']
   }
 
-  Note: 'Where each layer is downloaded from, per state. Maintainers edit rows; no code change for a new link.'
+  Note: 'Where each layer comes from and how to read it. A load uses the state source if there is one, otherwise the federal source. Edited on the admin page; no code change for a new link, format, or field name.'
 }
 
 Table public.load_runs {
@@ -418,4 +422,3 @@ Table storage.raster_assets {
     footprint [name: 'raster_assets_footprint_idx', note: 'GiST']
   }
 }
-

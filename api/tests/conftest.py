@@ -51,14 +51,24 @@ def empty_sources_and_runs(engine: Engine) -> None:
 
 
 @pytest.fixture
-def api_engine(reference_engine: Engine) -> Iterator[Engine]:
+def clean_engine(reference_engine: Engine) -> Iterator[Engine]:
+    """The reference test database with no sources or load runs, before and after a test.
+
+    Yields:
+        Engine connected to the reference test database.
+    """
+    empty_sources_and_runs(reference_engine)
+    yield reference_engine
+    empty_sources_and_runs(reference_engine)
+
+
+@pytest.fixture
+def api_engine(clean_engine: Engine) -> Iterator[Engine]:
     """Point the API at the reference test database, with no sources or load runs.
 
     Yields:
         Engine connected to the reference test database.
     """
-    app.dependency_overrides[get_reference_engine] = lambda: reference_engine
-    empty_sources_and_runs(reference_engine)
-    yield reference_engine
-    empty_sources_and_runs(reference_engine)
+    app.dependency_overrides[get_reference_engine] = lambda: clean_engine
+    yield clean_engine
     app.dependency_overrides.clear()

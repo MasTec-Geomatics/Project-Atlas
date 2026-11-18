@@ -1,39 +1,58 @@
-"""Load reference layers (ADR 0018).
+"""The reference loader (ADR 0018).
 
-Loads are started through the API with ``POST /api/v1/reference/loads``, which takes a
-list of layer and state pairs. Download links come from ``public.sources``, one row per
-layer and state (ADR 0021).
+There is one loader for every layer. Everything that differs between layers is data in
+``public.sources``: the link, access type, format, layer name inside the file, field
+mapping, rows to keep, and whether to cut the data at the state line.
+
+A load is one layer for one state. It uses the state source if there is one, otherwise
+the federal source. ``{state}`` and ``{fips}`` in a source's link, layer name, and keep
+values are filled in for the state being loaded.
 
 Each download link goes through the same steps, once per link:
 
-1. Download the source file with ``httpx``.
+1. Download the file with ``httpx``. A web service is read directly instead.
 2. Stage it as-is into the ``staging`` schema with ``ogr2ogr``, reprojected to EPSG:4326.
 3. Swap each state into the final table in its own transaction. Users see the previous
    data until that transaction commits.
 4. Record each state's run in ``public.load_runs``.
-
-A layer's loader in ``src/reference/loaders/`` only supplies what is different about
-it: a ``Loader`` that turns a ``public.sources`` row into a ``LayerSource``.
 """
 
+import json
 import os
 import shutil
 import subprocess
 import tempfile
 import zipfile
-from collections.abc import Callable, Sequence
-from dataclasses import dataclass, field
+from collections.abc import Sequence
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 import httpx
 import structlog
 from geoalchemy2 import Geometry
-from sqlalchemy import Engine, MetaData, Table, delete, func, insert, literal, select, update
+from sqlalchemy import (
+    ColumnElement,
+    Engine,
+    MetaData,
+    Select,
+    Table,
+    delete,
+    func,
+    insert,
+    literal,
+    nulls_last,
+    or_,
+    select,
+    update,
+)
 from sqlalchemy.orm import Session
 
 from src.core.config import settings
-from src.core.database import ReferenceBase
+from src.reference.models import metadata
+from src.reference.models.boundaries import State
 from src.reference.models.public import LoadRun, Source
+from src.reference.state_codes import STATE_FIPS
 
 log = structlog.get_logger(__name__)
 
@@ -42,136 +61,205 @@ STAGING_SCHEMA = "staging"
 # Connect and read timeouts. Read is per chunk, so large downloads are not cut off.
 DOWNLOAD_TIMEOUT = httpx.Timeout(60.0)
 
+# GDAL format name to the dataset's file suffix inside a downloaded zip.
+DATASET_SUFFIXES = {
+    "ESRI Shapefile": ".shp",
+    "GPKG": ".gpkg",
+    "OpenFileGDB": ".gdb",
+    "GeoJSON": ".geojson",
+}
+
+# Final geometry type to the PostGIS dimension kept when a geometry is cut at a state line.
+CLIP_DIMENSIONS = {"MULTIPOINT": 1, "MULTILINESTRING": 2, "MULTIPOLYGON": 3}
+
+# Columns every layer table has that a source does not fill.
+FRAMEWORK_COLUMNS = ("id", "state", "geom")
+
 
 class LoadError(Exception):
     """A load failed for a reason the maintainer has to look at."""
 
 
 @dataclass(frozen=True)
-class LayerSource:
-    """One layer's source for one state.
+class Load:
+    """One layer for one state, with its source filled in for that state.
 
     Attributes:
-        model: Final table model, such as ``Wetland``.
+        table: The final table, such as ``boundaries.places``.
         state: Two-letter state code, such as ``TX``.
-        url: Download link for the source file.
-        file_suffix: Suffix of the dataset inside a downloaded zip, such as ``.gpkg``.
-        columns: Final column name to staged source field name. ``ogr2ogr`` lowercases
-            source field names when it stages them. ``state`` and ``geom`` are filled
-            by the framework and are not listed here.
-        source_layer: Layer name inside the downloaded file, such as ``TX_Wetlands``.
-            ``None`` stages the file's only layer, as with a shapefile.
-        keep: Staged source field name to the values to load. Staged rows with any other
-            value in that field are left out. Empty loads every row.
+        url: The source link for this state.
+        access_type: ``file`` or ``service``.
+        format: GDAL format name, such as ``ESRI Shapefile``.
+        source_layer: Layer name inside the dataset, or ``None`` for its only layer.
+        field_mapping: Final column to provider field.
+        keep: Provider field to the values to keep. Empty keeps every row.
+        clip_to_state: Whether to cut the data at the state line.
     """
 
-    model: type[ReferenceBase]
+    table: Table
     state: str
     url: str
-    file_suffix: str
-    columns: dict[str, str]
-    source_layer: str | None = None
-    keep: dict[str, tuple[str, ...]] = field(default_factory=dict)
-
-
-@dataclass(frozen=True)
-class Loader:
-    """One layer's loader.
-
-    Attributes:
-        model: Final table model, such as ``Wetland``.
-        layer_source: Builds the ``LayerSource`` for one ``public.sources`` row.
-    """
-
-    model: type[ReferenceBase]
-    layer_source: Callable[[Source], LayerSource]
+    access_type: str
+    format: str
+    source_layer: str | None
+    field_mapping: dict[str, str]
+    keep: dict[str, list[str]]
+    clip_to_state: bool
 
     @property
     def layer(self) -> str:
-        """The layer name used in ``public.sources``, such as ``hydro.wetlands``."""
-        return final_table(self.model).fullname
+        """The layer name, such as ``boundaries.places``."""
+        return self.table.fullname
 
 
-def enabled_sources(engine: Engine, layer: str, state: str | None = None) -> list[Source]:
-    """Return a layer's enabled ``public.sources`` rows, ordered by state.
+def fill(text: str, state: str) -> str:
+    """Fill ``{state}`` and ``{fips}`` in a source value for one state.
+
+    Args:
+        text: A link, layer name, or keep value, such as ``tl_2026_{fips}_place.zip``.
+        state: Two-letter state code, such as ``TX``.
+
+    Returns:
+        The value for that state, such as ``tl_2026_48_place.zip``.
+    """
+    return text.replace("{state}", state).replace("{fips}", STATE_FIPS[state])
+
+
+def layer_table(layer: str) -> Table | None:
+    """Return the final table for a layer name, or ``None`` if it isn't a layer.
+
+    Args:
+        layer: Layer name, such as ``boundaries.places``.
+
+    Returns:
+        The table, when it exists and has ``state`` and ``geom`` columns.
+    """
+    table = metadata.tables.get(layer)
+    if table is None or "state" not in table.c or "geom" not in table.c:
+        return None
+    return table
+
+
+def find_source(engine: Engine, layer: str, state: str) -> Source | None:
+    """Return the enabled source a layer uses for a state.
 
     Args:
         engine: Engine for the reference database.
         layer: Layer name, such as ``hydro.wetlands``.
-        state: Two-letter state code to return only that state's row. ``None`` returns
-            every enabled state.
+        state: Two-letter state code, such as ``TX``.
 
     Returns:
-        The enabled sources.
+        The state source if there is one, otherwise the federal source, or ``None``.
     """
     query = (
         select(Source)
-        .where(Source.layer == layer, Source.is_enabled.is_(True))
-        .order_by(Source.state)
+        .where(
+            Source.layer == layer,
+            Source.is_enabled.is_(True),
+            or_(Source.state == state, Source.state.is_(None)),
+        )
+        .order_by(nulls_last(Source.state))
+        .limit(1)
     )
-    if state is not None:
-        query = query.where(Source.state == state)
     with Session(engine) as session:
-        return list(session.scalars(query))
+        return session.scalar(query)
 
 
-def run_loads(engine: Engine, sources: Sequence[LayerSource]) -> None:
-    """Load each source, downloading each link only once.
-
-    Sources that share a download link, such as several states from one national file,
-    are loaded from a single download. Links are loaded in the order they first appear.
+def plan_load(engine: Engine, layer: str, state: str) -> Load:
+    """Build the load for one layer and state from its source.
 
     Args:
         engine: Engine for the reference database.
-        sources: The layer and state of each load.
+        layer: Layer name, such as ``boundaries.places``.
+        state: Two-letter state code, such as ``TX``.
+
+    Returns:
+        The load, with ``{state}`` and ``{fips}`` filled in.
+
+    Raises:
+        LoadError: The layer or state is unknown, or the layer has no enabled source.
+    """
+    table = layer_table(layer)
+    if table is None:
+        raise LoadError(f"No layer named '{layer}'")
+    if state not in STATE_FIPS:
+        raise LoadError(f"Unknown state code '{state}'")
+    source = find_source(engine, layer, state)
+    if source is None:
+        raise LoadError(f"No enabled source for {layer} in {state}")
+
+    return Load(
+        table=table,
+        state=state,
+        url=fill(source.download_url, state),
+        access_type=source.access_type,
+        format=source.format,
+        source_layer=None if source.source_layer is None else fill(source.source_layer, state),
+        field_mapping=source.field_mapping,
+        keep={
+            field: [fill(value, state) for value in values]
+            for field, values in (source.keep or {}).items()
+        },
+        clip_to_state=source.clip_to_state,
+    )
+
+
+def run_loads(engine: Engine, loads: Sequence[Load]) -> None:
+    """Run each load, downloading each link only once.
+
+    Loads that share a link, such as several states from one national file, are loaded
+    from a single download. Links are loaded in the order they first appear.
+
+    Args:
+        engine: Engine for the reference database.
+        loads: The layer and state of each load.
 
     Raises:
         LoadError: A load failed. Its states are recorded as ``failed``, and the links
             after it are not loaded.
     """
-    by_url: dict[str, list[LayerSource]] = {}
-    for source in sources:
-        by_url.setdefault(source.url, []).append(source)
-    for url, url_sources in by_url.items():
-        run_download(engine, url, url_sources)
+    by_url: dict[str, list[Load]] = {}
+    for load in loads:
+        by_url.setdefault(load.url, []).append(load)
+    for url, url_loads in by_url.items():
+        run_download(engine, url, url_loads)
 
 
-def run_download(engine: Engine, url: str, sources: Sequence[LayerSource]) -> None:
-    """Download one link, then stage, swap, and record each source that uses it.
+def run_download(engine: Engine, url: str, loads: Sequence[Load]) -> None:
+    """Download one link, then stage, swap, and record each load that uses it.
 
-    Each final table is staged once from the download and then swapped in one state at a
-    time. Each state gets its own ``public.load_runs`` row.
+    Each final table and source layer is staged once from the download, then swapped in
+    one state at a time. Each state gets its own ``public.load_runs`` row.
 
     Args:
         engine: Engine for the reference database.
-        url: The download link the sources share.
-        sources: The layer and state loads that use this link.
+        url: The link the loads share.
+        loads: The layer and state loads that use this link.
 
     Raises:
         LoadError: The download, staging, or a swap failed. Every state not yet loaded is
             recorded as ``failed``, and its final table rows are unchanged.
     """
-    runs = [
-        (source, start_run(engine, final_table(source.model).fullname, source.state))
-        for source in sources
-    ]
+    runs = [(load, start_run(engine, load.layer, load.state)) for load in loads]
     pending = {run_id for _, run_id in runs}
-    url_log = log.bind(url=url, states=[source.state for source in sources])
+    url_log = log.bind(url=url, loads=[f"{load.layer}:{load.state}" for load in loads])
     url_log.info("load_started")
+    staged_tables: set[str] = set()
 
     try:
         settings.reference_work_dir.mkdir(parents=True, exist_ok=True)
         with tempfile.TemporaryDirectory(
             prefix="reference-load-", dir=settings.reference_work_dir
         ) as work_dir:
-            dataset, source_version = download(url, Path(work_dir), sources[0].file_suffix)
-            staged: set[tuple[str, str | None]] = set()
-            for source, run_id in runs:
-                table = final_table(source.model)
-                if (table.fullname, source.source_layer) not in staged:
-                    stage(engine, source, table, dataset)
-                    staged.add((table.fullname, source.source_layer))
-                rows_loaded = swap(engine, source, table)
+            dataset, source_version = open_dataset(loads[0], Path(work_dir))
+            staged: dict[tuple[str, str | None], str] = {}
+            for load, run_id in runs:
+                key = (load.layer, load.source_layer)
+                if key not in staged:
+                    staged[key] = f"{load.table.schema}_{load.table.name}_{len(staged)}"
+                    stage(engine, load, dataset, staged[key])
+                    staged_tables.add(staged[key])
+                rows_loaded = swap(engine, load, staged[key])
                 finish_run(
                     engine,
                     run_id,
@@ -182,42 +270,57 @@ def run_download(engine: Engine, url: str, sources: Sequence[LayerSource]) -> No
                 pending.discard(run_id)
                 url_log.info(
                     "load_succeeded",
-                    layer=table.fullname,
-                    state=source.state,
+                    layer=load.layer,
+                    state=load.state,
                     run_id=run_id,
                     rows_loaded=rows_loaded,
                     source_version=source_version,
                 )
-        drop_staged(engine, {final_table(source.model) for source in sources})
     except BaseException as error:
         # BaseException so Ctrl+C is recorded too, instead of leaving 'running' rows.
         for run_id in pending:
             finish_run(engine, run_id, status="failed", error=str(error) or repr(error))
         url_log.exception("load_failed", failed_run_ids=sorted(pending))
         raise
+    finally:
+        drop_staged(engine, staged_tables)
 
 
-def final_table(model: type[ReferenceBase]) -> Table:
-    """Return the ``Table`` behind a reference model."""
-    table = model.__table__
-    if not isinstance(table, Table):
-        raise TypeError(f"{model.__name__} is not mapped to a single table")
-    return table
+def open_dataset(load: Load, work_dir: Path) -> tuple[str, str | None]:
+    """Return what ``ogr2ogr`` reads for a load, downloading it first when it's a file.
+
+    Args:
+        load: The load being run.
+        work_dir: Temporary folder for the download.
+
+    Returns:
+        The dataset path or service address, and the source version if known.
+
+    Raises:
+        LoadError: The download failed or holds no dataset of the source's format.
+    """
+    if load.access_type == "service":
+        return load.url, None
+    suffix = DATASET_SUFFIXES.get(load.format)
+    if suffix is None:
+        raise LoadError(f"Files in format '{load.format}' can't be loaded")
+    downloaded, source_version = download(load.url, work_dir)
+    return str(find_dataset(downloaded, work_dir, [suffix])), source_version
 
 
-def download(url: str, work_dir: Path, file_suffix: str) -> tuple[Path, str | None]:
-    """Download the source file and return the dataset path and source version.
+def download(url: str, work_dir: Path) -> tuple[Path, str | None]:
+    """Download a file and return its path and source version.
 
     Args:
         url: Download link.
         work_dir: Temporary folder for the download.
-        file_suffix: Suffix of the dataset to find inside a zip, such as ``.gpkg``.
 
     Returns:
-        Path to the dataset, and the source's ``Last-Modified`` (or ``ETag``) header.
+        Path to the downloaded file, and the source's ``Last-Modified`` (or ``ETag``)
+        header.
 
     Raises:
-        LoadError: The link did not return the file, or the zip has no matching dataset.
+        LoadError: The link did not return the file.
     """
     downloaded = work_dir / "download"
     with httpx.stream("GET", url, follow_redirects=True, timeout=DOWNLOAD_TIMEOUT) as response:
@@ -227,30 +330,49 @@ def download(url: str, work_dir: Path, file_suffix: str) -> tuple[Path, str | No
         with downloaded.open("wb") as file:
             for chunk in response.iter_bytes():
                 file.write(chunk)
+    return downloaded, source_version
 
+
+def find_dataset(downloaded: Path, work_dir: Path, suffixes: Sequence[str]) -> Path:
+    """Return the dataset in a download, unzipping it first when it's a zip.
+
+    Args:
+        downloaded: The downloaded file.
+        work_dir: Temporary folder to unzip into.
+        suffixes: Dataset suffixes to look for, in order, such as ``[".gpkg"]``.
+
+    Returns:
+        Path to the one dataset with the first suffix found.
+
+    Raises:
+        LoadError: No dataset, or more than one, has that suffix.
+    """
     if not zipfile.is_zipfile(downloaded):
-        return downloaded.rename(work_dir / f"download{file_suffix}"), source_version
+        return downloaded.rename(downloaded.with_suffix(suffixes[0]))
 
     extracted = work_dir / "extracted"
     with zipfile.ZipFile(downloaded) as archive:
         archive.extractall(extracted)
     downloaded.unlink()
 
-    matches = sorted(extracted.rglob(f"*{file_suffix}"))
-    if len(matches) != 1:
-        found = [path.name for path in matches]
-        raise LoadError(f"Expected one {file_suffix} dataset in the download, found {found}")
-    return matches[0], source_version
+    for suffix in suffixes:
+        matches = sorted(extracted.rglob(f"*{suffix}"))
+        if len(matches) == 1:
+            return matches[0]
+        if len(matches) > 1:
+            found = [path.name for path in matches]
+            raise LoadError(f"Expected one {suffix} dataset in the download, found {found}")
+    raise LoadError(f"No {' or '.join(suffixes)} dataset in the download")
 
 
-def stage(engine: Engine, source: LayerSource, table: Table, dataset: Path) -> None:
-    """Copy the source layer into ``staging.<table>`` as-is, reprojected to EPSG:4326.
+def stage(engine: Engine, load: Load, dataset: str, staged_name: str) -> None:
+    """Copy the source layer into ``staging.<staged_name>`` as-is, reprojected to EPSG:4326.
 
     Args:
         engine: Engine for the reference database.
-        source: The layer being loaded.
-        table: The final table; the staging table gets the same name.
-        dataset: Path to the downloaded dataset.
+        load: The load being run.
+        dataset: The dataset path or service address.
+        staged_name: Name of the staging table.
 
     Raises:
         LoadError: ``ogr2ogr`` is missing or failed.
@@ -259,21 +381,22 @@ def stage(engine: Engine, source: LayerSource, table: Table, dataset: Path) -> N
     connection = (
         f"PG:host={url.host} port={url.port or 5432} dbname={url.database} user={url.username}"
     )
-    layer = [] if source.source_layer is None else [source.source_layer]
-    run_ogr2ogr(
+    source_layer = [] if load.source_layer is None else [load.source_layer]
+    run_gdal(
+        "ogr2ogr",
         [
             "-f",
             "PostgreSQL",
             connection,
-            str(dataset),
-            *layer,
+            dataset,
+            *source_layer,
             "-nln",
-            f"{STAGING_SCHEMA}.{table.name}",
+            f"{STAGING_SCHEMA}.{staged_name}",
             "-overwrite",
             "-t_srs",
             "EPSG:4326",
             "-nlt",
-            final_geometry_type(table),
+            final_geometry_type(load.table),
             "-lco",
             "GEOMETRY_NAME=geom",
             "-lco",
@@ -283,86 +406,147 @@ def stage(engine: Engine, source: LayerSource, table: Table, dataset: Path) -> N
     )
 
 
-def run_ogr2ogr(arguments: list[str], *, password: str | None = None) -> None:
-    """Run GDAL's ``ogr2ogr`` with the given arguments.
+def run_gdal(tool: str, arguments: list[str], *, password: str | None = None) -> str:
+    """Run a GDAL command-line tool and return what it printed.
 
     Args:
-        arguments: Everything after ``ogr2ogr`` on the command line.
+        tool: ``ogr2ogr`` or ``ogrinfo``.
+        arguments: Everything after the tool name on the command line.
         password: PostgreSQL password, passed in the environment so it never shows in
             the process list.
 
+    Returns:
+        The tool's standard output.
+
     Raises:
-        LoadError: ``ogr2ogr`` is not installed or exited with an error.
+        LoadError: The tool is not installed or exited with an error.
     """
-    ogr2ogr = shutil.which("ogr2ogr")
-    if ogr2ogr is None:
-        raise LoadError("ogr2ogr was not found. Install GDAL on this machine.")
+    executable = shutil.which(tool)
+    if executable is None:
+        raise LoadError(f"{tool} was not found. Install GDAL on this machine.")
 
     environment = {**os.environ, "PGPASSWORD": password or ""}
-    result = subprocess.run([ogr2ogr, *arguments], env=environment, capture_output=True, text=True)  # noqa: S603
+    result = subprocess.run(  # noqa: S603
+        [executable, *arguments], env=environment, capture_output=True, text=True
+    )
     if result.returncode != 0:
-        raise LoadError(f"ogr2ogr failed: {result.stderr.strip()}")
+        raise LoadError(f"{tool} failed: {result.stderr.strip()}")
+    return result.stdout
 
 
 def final_geometry_type(table: Table) -> str:
-    """Return the final table's geometry type, such as ``MULTIPOLYGON``, for ``ogr2ogr -nlt``."""
+    """Return the final table's geometry type, such as ``MULTIPOLYGON``."""
     geometry = table.c.geom.type
     if not isinstance(geometry, Geometry) or geometry.geometry_type is None:
         raise TypeError(f"{table.fullname}.geom is not a typed PostGIS geometry column")
     return geometry.geometry_type
 
 
-def swap(engine: Engine, source: LayerSource, table: Table) -> int:
+def swap(engine: Engine, load: Load, staged_name: str) -> int:
     """Replace the state's rows in the final table with the staged rows, in one transaction.
 
     The staged table is kept, so other states can be swapped in from it.
 
     Args:
         engine: Engine for the reference database.
-        source: The layer being loaded.
-        table: The final table.
+        load: The load being run.
+        staged_name: Name of the staging table.
 
     Returns:
         Number of rows loaded.
 
     Raises:
-        LoadError: The staged source is missing an expected field.
+        LoadError: The staged source is missing a mapped field, or the state's outline
+            is needed and not loaded.
     """
-    with engine.begin() as connection:
-        staged = Table(table.name, MetaData(), schema=STAGING_SCHEMA, autoload_with=connection)
+    table = load.table
+    # ogr2ogr lowercases field names when it stages them.
+    mapping = {column: field.lower() for column, field in load.field_mapping.items()}
+    keep = {field.lower(): values for field, values in load.keep.items()}
 
-        expected = [*source.columns.values(), *source.keep, "geom"]
-        missing = [name for name in expected if name not in staged.c]
+    with engine.begin() as connection:
+        staged = Table(staged_name, MetaData(), schema=STAGING_SCHEMA, autoload_with=connection)
+
+        missing = [name for name in [*mapping.values(), *keep] if name not in staged.c]
         if missing:
             raise LoadError(
-                f"Staged source for {table.fullname} is missing expected fields {missing}. "
-                f"The source may have changed; the final table was not touched."
+                f"The source for {load.layer} has no fields {missing}. "
+                f"The provider may have renamed them; the final table was not touched."
             )
 
-        kept = (staged.c[name].in_(values) for name, values in source.keep.items())
-        rows = select(
-            literal(source.state),
-            *(staged.c[name] for name in source.columns.values()),
-            staged.c.geom,
-        ).where(*kept)
+        kept = [staged.c[field].in_(values) for field, values in keep.items()]
+        columns = [staged.c[field] for field in mapping.values()]
+        if load.clip_to_state:
+            has_outline = connection.scalar(
+                select(func.count()).select_from(State).where(State.state == load.state)
+            )
+            if not has_outline:
+                raise LoadError(
+                    f"{load.layer} is cut at the state line. Load boundaries.states for "
+                    f"{load.state} first."
+                )
+            rows = clipped_rows(load, staged, columns, kept)
+        else:
+            rows = select(literal(load.state), *columns, staged.c.geom).where(*kept)
 
-        in_state = table.c.state == source.state
+        in_state = table.c.state == load.state
         connection.execute(delete(table).where(in_state))
-        connection.execute(insert(table).from_select(["state", *source.columns, "geom"], rows))
+        connection.execute(insert(table).from_select(["state", *mapping, "geom"], rows))
         rows_loaded = connection.scalar(select(func.count()).select_from(table).where(in_state))
         return rows_loaded or 0
 
 
-def drop_staged(engine: Engine, tables: set[Table]) -> None:
-    """Drop the staged copies of the given final tables, once every state is swapped in.
+def clipped_rows(
+    load: Load,
+    staged: Table,
+    columns: Sequence[Any],
+    kept: Sequence[ColumnElement[bool]],
+) -> Select[Any]:
+    """Select the staged rows cut at the state line, using ``boundaries.states``.
+
+    Args:
+        load: The load being run.
+        staged: The staging table.
+        columns: The staged fields, in final column order.
+        kept: Conditions for the rows to keep.
+
+    Returns:
+        The state code, mapped fields, and cut geometry of each row inside the state.
+    """
+    outline = State.__table__
+    geometry_type = final_geometry_type(load.table)
+    cut: ColumnElement[Any]
+    if geometry_type in CLIP_DIMENSIONS:
+        cut = func.ST_Multi(
+            func.ST_CollectionExtract(
+                func.ST_Intersection(staged.c.geom, outline.c.geom),
+                CLIP_DIMENSIONS[geometry_type],
+            )
+        )
+    elif geometry_type == "POINT":
+        cut = staged.c.geom
+    else:
+        cut = func.ST_Intersection(staged.c.geom, outline.c.geom)
+
+    inside = (
+        select(literal(load.state).label("state"), *columns, cut.label("geom"))
+        .select_from(staged.join(outline, func.ST_Intersects(staged.c.geom, outline.c.geom)))
+        .where(outline.c.state == load.state, *kept)
+        .subquery()
+    )
+    return select(inside).where(func.ST_IsEmpty(inside.c.geom).is_(False))
+
+
+def drop_staged(engine: Engine, staged_names: set[str]) -> None:
+    """Drop the given staging tables.
 
     Args:
         engine: Engine for the reference database.
-        tables: The final tables whose ``staging`` copies are dropped.
+        staged_names: Names of the staging tables.
     """
     with engine.begin() as connection:
-        for table in tables:
-            Table(table.name, MetaData(), schema=STAGING_SCHEMA).drop(connection, checkfirst=True)
+        for name in staged_names:
+            Table(name, MetaData(), schema=STAGING_SCHEMA).drop(connection, checkfirst=True)
 
 
 def start_run(engine: Engine, layer: str, state: str) -> int:
@@ -396,3 +580,123 @@ def finish_run(
                 finished_at=func.now(),
             )
         )
+
+
+@dataclass(frozen=True)
+class SourceLayer:
+    """One layer found inside a dataset.
+
+    Attributes:
+        name: The layer's name, such as ``TX_Wetlands``.
+        fields: The layer's field names, as the provider spells them.
+    """
+
+    name: str
+    fields: list[str]
+
+
+@dataclass(frozen=True)
+class CheckedLink:
+    """What a source link holds, and how it matches a layer's columns.
+
+    Attributes:
+        format: GDAL format name, such as ``GPKG``.
+        layers: Every layer in the dataset.
+        source_layer: The layer to load, as a pattern with ``{state}`` when the current
+            source uses one, or ``None`` when it can't be picked.
+        field_mapping: Final column to the matched provider field, or ``None`` when no
+            field matched.
+    """
+
+    format: str
+    layers: list[SourceLayer]
+    source_layer: str | None
+    field_mapping: dict[str, str | None]
+
+
+def check_link(engine: Engine, layer: str, state: str, url: str, access_type: str) -> CheckedLink:
+    """Open a source link with ``ogrinfo`` and match its fields to a layer's columns.
+
+    Fields are matched to the layer's current source first, then by the same name as the
+    column, ignoring case.
+
+    Args:
+        engine: Engine for the reference database.
+        layer: Layer name, such as ``boundaries.places``.
+        state: Two-letter state code used to fill ``{state}`` and ``{fips}``.
+        url: The link, which may hold ``{state}`` and ``{fips}``.
+        access_type: ``file`` or ``service``.
+
+    Returns:
+        The format, layers, and matched fields.
+
+    Raises:
+        LoadError: The layer or state is unknown, or the link can't be opened.
+    """
+    table = layer_table(layer)
+    if table is None:
+        raise LoadError(f"No layer named '{layer}'")
+    if state not in STATE_FIPS:
+        raise LoadError(f"Unknown state code '{state}'")
+
+    filled_url = fill(url, state)
+    settings.reference_work_dir.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(
+        prefix="reference-check-", dir=settings.reference_work_dir
+    ) as work_dir:
+        if access_type == "service":
+            dataset = filled_url
+        else:
+            downloaded, _ = download(filled_url, Path(work_dir))
+            dataset = str(find_dataset(downloaded, Path(work_dir), list(DATASET_SUFFIXES.values())))
+        info: dict[str, Any] = json.loads(run_gdal("ogrinfo", ["-json", "-so", "-al", dataset]))
+
+    layers = [
+        SourceLayer(name=item["name"], fields=[field["name"] for field in item.get("fields", [])])
+        for item in info.get("layers", [])
+    ]
+    current = find_source(engine, layer, state)
+    chosen = pick_layer(layers, current, state)
+    fields = [] if chosen is None else chosen.fields
+    columns = [column.name for column in table.c if column.name not in FRAMEWORK_COLUMNS]
+    current_mapping = {} if current is None else current.field_mapping
+
+    field_mapping: dict[str, str | None] = {}
+    for column in columns:
+        by_name = {field.lower(): field for field in fields}
+        previous = current_mapping.get(column)
+        if previous is not None and previous.lower() in by_name:
+            field_mapping[column] = by_name[previous.lower()]
+        else:
+            field_mapping[column] = by_name.get(column.lower())
+
+    source_layer: str | None = None
+    if chosen is not None and len(layers) > 1:
+        pattern = None if current is None else current.source_layer
+        source_layer = pattern if pattern and fill(pattern, state) == chosen.name else chosen.name
+
+    return CheckedLink(
+        format=info.get("driverShortName", ""),
+        layers=layers,
+        source_layer=source_layer,
+        field_mapping=field_mapping,
+    )
+
+
+def pick_layer(layers: list[SourceLayer], current: Source | None, state: str) -> SourceLayer | None:
+    """Pick the layer to load: the only one, or the one the current source names.
+
+    Args:
+        layers: Every layer in the dataset.
+        current: The layer's current source, if any.
+        state: Two-letter state code used to fill the current source's layer name.
+
+    Returns:
+        The layer, or ``None`` when it can't be picked.
+    """
+    if len(layers) == 1:
+        return layers[0]
+    if current is None or current.source_layer is None:
+        return None
+    wanted = fill(current.source_layer, state)
+    return next((item for item in layers if item.name == wanted), None)
