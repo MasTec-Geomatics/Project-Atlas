@@ -1,9 +1,15 @@
-"""Tests for the load endpoint, ``POST /api/v1/reference/loads``.
+"""Tests for the admin page's load endpoints.
 
-The request is a list of layer and state pairs, one per checked box on the admin page.
+- ``GET /api/v1/reference/states``: the states for the **Add a state** box.
+- ``GET /api/v1/reference/layers``: the layers, one column each.
+- ``POST /api/v1/reference/loads``: the **Load** button. The request is a list of layer
+  and state pairs, one per checked box.
+- ``GET /api/v1/reference/loads``: the last load of each layer and state, for the
+  progress bar and the result in each box.
 """
 
 from collections.abc import Sequence
+from datetime import UTC, datetime
 
 import pytest
 from fastapi.testclient import TestClient
@@ -12,11 +18,13 @@ from sqlalchemy import Engine, insert
 from src.app import app
 from src.reference import api
 from src.reference.load import Load, LoadError
-from src.reference.models.public import Source
+from src.reference.models.public import LoadRun, Source
 
 client = TestClient(app)
 
 URL = "/api/v1/reference/loads"
+STATES_URL = "/api/v1/reference/states"
+LAYERS_URL = "/api/v1/reference/layers"
 
 
 def add_source(engine: Engine, layer: str, state: str | None = None) -> None:
@@ -168,3 +176,83 @@ def test_failed_load_does_not_break_the_response(
     response = client.post(URL, json=[{"layer": "hydro.wetlands", "state": "TX"}])
 
     assert response.status_code == 202
+
+
+def add_run(engine: Engine, layer: str, state: str, status: str, started: datetime) -> None:
+    """Insert one ``public.load_runs`` row."""
+    finished = None if status == "running" else started
+    with engine.begin() as connection:
+        connection.execute(
+            insert(LoadRun).values(
+                layer=layer,
+                state=state,
+                status=status,
+                rows_loaded=10 if status == "succeeded" else None,
+                error="source is down" if status == "failed" else None,
+                started_at=started,
+                finished_at=finished,
+            )
+        )
+
+
+def test_states_have_code_and_name() -> None:
+    """Every state comes back with its code and full name, so either can be searched."""
+    response = client.get(STATES_URL)
+
+    assert response.status_code == 200
+    states = response.json()
+    assert len(states) == 51
+    assert {"code": "NC", "name": "North Carolina"} in states
+    assert {"code": "DC", "name": "District of Columbia"} in states
+
+
+def test_states_are_in_name_order() -> None:
+    """States come back alphabetized by full name."""
+    names = [state["name"] for state in client.get(STATES_URL).json()]
+
+    assert names == sorted(names)
+
+
+def test_layers() -> None:
+    """Every layer table comes back by name; tables that aren't layers don't."""
+    response = client.get(LAYERS_URL)
+
+    assert response.status_code == 200
+    layers = response.json()
+    assert "boundaries.states" in layers
+    assert "hydro.wetlands" in layers
+    assert "public.sources" not in layers
+    assert "public.load_runs" not in layers
+    assert layers == sorted(layers)
+
+
+def test_last_load_of_each_layer_and_state(api_engine: Engine) -> None:
+    """Only the newest load of each layer and state comes back."""
+    add_run(api_engine, "hydro.wetlands", "TX", "failed", datetime(2026, 11, 1, tzinfo=UTC))
+    add_run(api_engine, "hydro.wetlands", "TX", "succeeded", datetime(2026, 11, 2, tzinfo=UTC))
+    add_run(api_engine, "boundaries.counties", "LA", "running", datetime(2026, 11, 3, tzinfo=UTC))
+
+    response = client.get(URL)
+
+    assert response.status_code == 200
+    loads = {(item["layer"], item["state"]): item for item in response.json()}
+    assert set(loads) == {("hydro.wetlands", "TX"), ("boundaries.counties", "LA")}
+    assert loads["hydro.wetlands", "TX"]["status"] == "succeeded"
+    assert loads["hydro.wetlands", "TX"]["rows_loaded"] == 10
+    assert loads["boundaries.counties", "LA"]["status"] == "running"
+    assert loads["boundaries.counties", "LA"]["finished_at"] is None
+
+
+def test_failed_load_has_its_error(api_engine: Engine) -> None:
+    """A failed load comes back with its error, so the page can show why."""
+    add_run(api_engine, "hydro.wetlands", "TX", "failed", datetime(2026, 11, 1, tzinfo=UTC))
+
+    [load] = client.get(URL).json()
+
+    assert load["status"] == "failed"
+    assert load["error"] == "source is down"
+
+
+def test_no_loads_yet(api_engine: Engine) -> None:
+    """With nothing loaded, the list is empty."""
+    assert client.get(URL).json() == []

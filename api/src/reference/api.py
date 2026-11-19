@@ -1,6 +1,9 @@
 """Reference database endpoints, used by the admin page.
 
-- ``/loads``: load a list of layer and state pairs, the admin page's **Load** button.
+- ``/states``: every state's code and full name, for the **Add a state** box.
+- ``/layers``: every layer, one column each in the **Load** table.
+- ``/loads``: load a list of layer and state pairs, the admin page's **Load** button, and
+  read the last load of each layer and state.
 - ``/sources``: list, add, and edit sources.
 - ``/sources/check``: open a link and match its fields to a layer, before saving.
 """
@@ -14,6 +17,7 @@ import structlog
 from fastapi import APIRouter, BackgroundTasks, Body, Depends, HTTPException, status
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import Engine, func, select
+from sqlalchemy.dialects.postgresql import distinct_on
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
@@ -26,8 +30,9 @@ from src.reference.load import (
     plan_load,
     run_loads,
 )
-from src.reference.models.public import Source
-from src.reference.state_codes import STATE_FIPS
+from src.reference.models import metadata
+from src.reference.models.public import LoadRun, Source
+from src.reference.state_codes import STATE_FIPS, STATE_NAMES
 
 log = structlog.get_logger(__name__)
 
@@ -48,6 +53,44 @@ class LoadRequest(BaseModel):
 
     layer: str
     state: str = Field(pattern=STATE_PATTERN)
+
+
+class StateRead(BaseModel):
+    """A state, searchable by code or full name.
+
+    Attributes:
+        code: Two-letter state code, such as ``NC``.
+        name: Full name, such as ``North Carolina``.
+    """
+
+    code: str
+    name: str
+
+
+class LoadRead(BaseModel):
+    """The last load of one layer and state.
+
+    Attributes:
+        layer: Layer name, such as ``hydro.wetlands``.
+        state: Two-letter state code, such as ``TX``.
+        status: ``running``, ``succeeded``, or ``failed``.
+        rows_loaded: Rows in the layer for the state after the load, once it succeeded.
+        source_version: The source's version or last-updated date, once it succeeded.
+        error: Why the load failed.
+        started_at: When the load started.
+        finished_at: When the load ended, or ``None`` while it's running.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    layer: str
+    state: str
+    status: str
+    rows_loaded: int | None
+    source_version: str | None
+    error: str | None
+    started_at: datetime
+    finished_at: datetime | None
 
 
 class LoadsStarted(BaseModel):
@@ -244,6 +287,48 @@ def check_layer_and_state(layer: str, state: str | None) -> None:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, f"No layer named '{layer}'")
     if state is not None and state not in STATE_FIPS:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, f"Unknown state code '{state}'")
+
+
+@router.get("/states")
+def list_states() -> list[StateRead]:
+    """List every state's code and full name, by name.
+
+    Returns:
+        The 50 states and the District of Columbia.
+    """
+    states = [StateRead(code=code, name=name) for code, name in STATE_NAMES.items()]
+    return sorted(states, key=lambda state: state.name)
+
+
+@router.get("/layers")
+def list_layers() -> list[str]:
+    """List every layer by name, such as ``boundaries.places``.
+
+    Returns:
+        Every table with ``state`` and ``geom`` columns, in name order.
+    """
+    return sorted(name for name in metadata.tables if layer_table(name) is not None)
+
+
+@router.get("/loads")
+def list_loads(engine: ReferenceEngine) -> list[LoadRead]:
+    """List the last load of each layer and state.
+
+    The admin page asks for this every few seconds while a load is running.
+
+    Args:
+        engine: Engine for the reference database.
+
+    Returns:
+        The newest ``public.load_runs`` row for each layer and state.
+    """
+    query = (
+        select(LoadRun)
+        .ext(distinct_on(LoadRun.layer, LoadRun.state))
+        .order_by(LoadRun.layer, LoadRun.state, LoadRun.started_at.desc())
+    )
+    with Session(engine) as session:
+        return [LoadRead.model_validate(run) for run in session.scalars(query)]
 
 
 @router.post("/loads", status_code=status.HTTP_202_ACCEPTED)
