@@ -5,7 +5,7 @@
 
 ## Context
 
-The Vue portal, and possibly other tools later, call the API. They need routes and responses that do not change underneath them.
+The React portal, and possibly other tools later, call the API. They need routes and responses that do not change underneath them.
 
 `api/pyproject.toml` also has a `version`, which is the release number of the Atlas code.
 

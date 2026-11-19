@@ -7,7 +7,7 @@
 
 Project Atlas is expected to evolve as the Geomatics group's operational requirements become better defined.
 
-The initial implementation uses FastAPI and Vue, but future requirements may justify replacing either technology.
+The initial implementation uses FastAPI and React, but future requirements may justify replacing either technology.
 
 The architecture should support these changes without requiring the entire application to be rewritten.
 

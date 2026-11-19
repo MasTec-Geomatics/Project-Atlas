@@ -2,6 +2,7 @@
 
 **Status:** Accepted
 **Date:** 2026-11-09
+**Revised:** 2026-11-19
 
 ## Context
 
@@ -11,7 +12,7 @@ All Atlas work is in the United States.
 
 ## Decision
 
-Use MapLibre GL JS for web maps, used directly inside Vue components.
+Use MapLibre GL JS for web maps, through `react-map-gl` (its `react-map-gl/maplibre` entry point) in React components (ADR 0024). The underlying MapLibre map is still available through `getMap()` for anything the wrapper does not cover.
 
 Use the USGS National Map as the basemap:
 

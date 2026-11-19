@@ -3,7 +3,7 @@
 ![Status](https://img.shields.io/badge/status-early_development-orange)
 ![Python](https://img.shields.io/badge/Python-3.14-3776AB?logo=python&logoColor=white)
 ![FastAPI](https://img.shields.io/badge/FastAPI-009688?logo=fastapi&logoColor=white)
-![Vue](https://img.shields.io/badge/Vue-3-4FC08D?logo=vuedotjs&logoColor=white)
+![React](https://img.shields.io/badge/React-61DAFB?logo=react&logoColor=black)
 ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-4169E1?logo=postgresql&logoColor=white)
 ![PostGIS](https://img.shields.io/badge/PostGIS-spatial_database-4169E1)
 ![Podman](https://img.shields.io/badge/Podman-892CA0?logo=podman&logoColor=white)
@@ -126,13 +126,16 @@ The objective is to establish a traceable publication process and reduce rework 
 | Component         | Technology                            | Purpose                                          |
 | ----------------- | ------------------------------------- | ------------------------------------------------ |
 | API               | Python / FastAPI                      | Application endpoints and business logic         |
-| Frontend          | Vue 3 / TypeScript                    | Dashboards, task management, and visualization   |
-| UI Components     | Vuetify 4                             | Forms, dialogs, layout, and navigation           |
+| Frontend          | React / TypeScript                    | Dashboards, task management, and visualization   |
+| UI Components     | Mantine / Tabler Icons                | Forms, dialogs, layout, and navigation           |
+| Styling           | CSS Modules                           | Component styles in plain, modern CSS            |
+| Routing           | TanStack Router                       | File-based, type-safe routes                     |
 | Tables            | TanStack Table                        | Data tables                                      |
-| Server State      | TanStack Vue Query                    | API data fetching and caching                    |
+| Server State      | TanStack Query                        | API data fetching and caching                    |
+| Client State      | Zustand                               | Shared browser-only state                        |
 | API Client        | openapi-typescript / openapi-fetch    | Types generated from the API schema              |
-| Forms             | VeeValidate / Zod                     | Form state and validation                        |
-| Web Maps          | MapLibre GL JS                        | Project location maps                            |
+| Forms             | TanStack Form / Zod                   | Form state and validation                        |
+| Web Maps          | MapLibre GL JS / react-map-gl         | Project location maps                            |
 | Basemaps          | USGS National Map                     | Topo and imagery basemaps                        |
 | Database          | PostgreSQL / PostGIS                  | Operational and spatial data                     |
 | ORM / Database    | SQLAlchemy / GeoAlchemy2              | Database access and spatial models               |
@@ -149,6 +152,7 @@ The objective is to establish a traceable publication process and reduce rework 
 | Containers        | Podman                                | Local and containerized application environments |
 | Orchestration     | Kubernetes (planned)                  | Deployment orchestration when required           |
 | Python Tooling    | ruff / mypy / pytest                  | Linting, formatting, type checking, tests        |
+| Frontend Tests    | Vitest / Testing Library              | Component and unit tests                         |
 | Development Tools | just / uv / Bun / Vite+               | Tasks, Python, dependency, and frontend tooling  |
 
 Components listed here include both existing project decisions and planned capabilities. Production infrastructure and some library selections remain subject to evaluation.
@@ -161,7 +165,7 @@ The frontend, core API, background workers, and storage systems have distinct re
 
 ```text
                      +----------------------+
-                     |     Vue Frontend     |
+                     |    React Frontend    |
                      |   Dashboard / Maps   |
                      +-----------+----------+
                                  |
@@ -203,7 +207,7 @@ Background workers execute independently of the API process and communicate usin
 
 These boundaries are intended to support independent deployment and future technology changes.
 
-**FastAPI and Vue are current technology choices, not permanent architectural dependencies.**
+**FastAPI and React are current technology choices, not permanent architectural dependencies.**
 
 A future Go API or different frontend framework should be able to replace the corresponding component without requiring the entire platform to be rewritten.
 
@@ -231,10 +235,10 @@ The initial queue and scheduling implementation has not been finalized.
 
 Atlas uses two databases in one PostgreSQL instance:
 
-| Database    | Holds                                                                  |
-| ----------- | ---------------------------------------------------------------------- |
-| `atlas`     | Projects, tasks, deliverables, project GIS data, standards, audit log  |
-| `reference` | Public GIS layers, read-only for users (ADR 0017)                      |
+| Database    | Holds                                                                 |
+| ----------- | --------------------------------------------------------------------- |
+| `atlas`     | Projects, tasks, deliverables, project GIS data, standards, audit log |
+| `reference` | Public GIS layers, read-only for users (ADR 0017)                     |
 
 Schemas in `atlas` (table design in `docs/atlas-db.dbml`):
 
@@ -503,21 +507,21 @@ just db-migrate-reference
 
 Phases follow the milestones on the Project Atlas board.
 
-| Phase | Scope                                                                        | Status      |
-| ----- | ---------------------------------------------------------------------------- | ----------- |
-| 1     | Repository setup and initial architecture                                    | Done        |
-| 2     | Reference database (local): migrations, models, loaders, Texas layers        | In progress |
-| 3     | Reference database (production): managed cluster, logins, QGIS, first loads  | Planned     |
-| 4     | Foundation: API core conventions, tooling, migrations, web foundation        | In progress |
-| 5     | Team demo: projects, tasks, dashboard, map, temporary auth, hosted           | Planned     |
-| 6     | Identity and projects: Okta sign-in, roles, project records                  | Planned     |
-| 7     | Reference admin: maintainer page for load status, update checks, and loads   | Planned     |
-| 8     | Datasets and point clouds                                                    | Planned     |
-| 9     | Survey data and standards                                                    | Planned     |
-| 10    | Maps                                                                         | Planned     |
-| 11    | Deliverable review and release workflows                                     | Planned     |
-| 12    | Procore and reporting integrations                                           | Discovery   |
-| 13    | Production deployment and operational hardening                              | Planned     |
+| Phase | Scope                                                                       | Status      |
+| ----- | --------------------------------------------------------------------------- | ----------- |
+| 1     | Repository setup and initial architecture                                   | Done        |
+| 2     | Reference database (local): migrations, models, loaders, Texas layers       | In progress |
+| 3     | Reference database (production): managed cluster, logins, QGIS, first loads | Planned     |
+| 4     | Foundation: API core conventions, tooling, migrations, web foundation       | In progress |
+| 5     | Team demo: projects, tasks, dashboard, map, temporary auth, hosted          | Planned     |
+| 6     | Identity and projects: Okta sign-in, roles, project records                 | Planned     |
+| 7     | Reference admin: maintainer page for load status, update checks, and loads  | Planned     |
+| 8     | Datasets and point clouds                                                   | Planned     |
+| 9     | Survey data and standards                                                   | Planned     |
+| 10    | Maps                                                                        | Planned     |
+| 11    | Deliverable review and release workflows                                    | Planned     |
+| 12    | Procore and reporting integrations                                          | Discovery   |
+| 13    | Production deployment and operational hardening                             | Planned     |
 
 The roadmap is directional rather than a fixed implementation schedule. Feature priorities may change as the Geomatics group's requirements and enterprise integration capabilities become clearer.
 
@@ -551,3 +555,4 @@ This README is a living document and will be updated as features are implemented
 ## License
 
 A project license has not yet been selected. Until a license is established, the repository should not be assumed to grant permission for external reuse or redistribution.
+

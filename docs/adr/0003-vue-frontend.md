@@ -1,8 +1,9 @@
 # 0003. Vue for the Frontend
 
-**Status:** Accepted
+**Status:** Superseded by [0024](0024-react-frontend.md)
 **Date:** 2026-11-02
 **Revised:** 2026-11-09
+**Superseded:** 2026-11-19
 
 ## Context
 
@@ -30,18 +31,18 @@ Styling is written as plain CSS in Vue scoped styles. Tailwind and design tokens
 
 ## Libraries
 
-| Purpose          | Library                            |
-| ---------------- | ---------------------------------- |
-| UI components    | Vuetify 4                          |
-| Tables           | TanStack Table                     |
-| Server state     | TanStack Vue Query                 |
-| API client       | openapi-typescript + openapi-fetch |
-| Forms            | VeeValidate + Zod                  |
-| Client state     | Pinia                              |
-| Routing          | Vue Router                         |
-| Maps             | MapLibre GL JS (see ADR 0011)      |
-| Authentication   | See ADR 0012                       |
-| Tooling          | Vite+ and Bun                      |
+| Purpose        | Library                            |
+| -------------- | ---------------------------------- |
+| UI components  | Vuetify 4                          |
+| Tables         | TanStack Table                     |
+| Server state   | TanStack Vue Query                 |
+| API client     | openapi-typescript + openapi-fetch |
+| Forms          | VeeValidate + Zod                  |
+| Client state   | Pinia                              |
+| Routing        | Vue Router                         |
+| Maps           | MapLibre GL JS (see ADR 0011)      |
+| Authentication | See ADR 0012                       |
+| Tooling        | Vite+ and Bun                      |
 
 API types are generated from the FastAPI OpenAPI schema. They are not written by hand.
 
