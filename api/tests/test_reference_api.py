@@ -163,7 +163,7 @@ def test_bad_state_code(started: list[list[Load]]) -> None:
 
 
 def test_failed_load_does_not_break_the_response(
-        api_engine: Engine, monkeypatch: pytest.MonkeyPatch
+    api_engine: Engine, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A load that fails in the background still leaves the 202 response intact."""
     add_source(api_engine, "hydro.wetlands")
