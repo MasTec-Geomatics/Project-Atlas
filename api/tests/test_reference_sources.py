@@ -1,183 +1,114 @@
-"""Tests for the reference sources endpoints, ``/api/v1/reference/sources``."""
+"""Tests for the sources endpoints, used by the admin page's source forms."""
 
-import pytest
+from typing import Any
+
 from fastapi.testclient import TestClient
-from sqlalchemy import Engine, insert
+from sqlalchemy import Engine
 
 from src.app import app
-from src.reference.load import enabled_sources
-from src.reference.models.public import Source
 
 client = TestClient(app)
 
-TX_URL = "https://example.com/TX_geopackage_wetlands.zip"
-LA_URL = "https://example.com/LA_geopackage_wetlands.zip"
+URL = "/api/v1/reference/sources"
+
+PLACES_SOURCE: dict[str, Any] = {
+    "layer": "boundaries.places",
+    "download_url": "https://example.com/tl_2026_{fips}_place.zip",
+    "access_type": "file",
+    "format": "ESRI Shapefile",
+    "field_mapping": {"geoid": "GEOID", "name": "NAME"},
+}
 
 
-def add_source(engine: Engine, state: str, url: str, *, is_enabled: bool = True) -> None:
-    """Insert one ``hydro.wetlands`` row into ``public.sources``."""
-    with engine.begin() as connection:
-        connection.execute(
-            insert(Source).values(
-                layer="hydro.wetlands",
-                state=state,
-                download_url=url,
-                format="gpkg",
-                is_enabled=is_enabled,
-            )
-        )
-
-
-@pytest.mark.usefixtures("api_engine")
-def test_create_source() -> None:
-    """A new source is saved and returned with its id and defaults."""
-    response = client.post(
-        "/api/v1/reference/sources",
-        json={
-            "layer": "hydro.wetlands",
-            "state": "TX",
-            "download_url": TX_URL,
-            "format": "gpkg",
-        },
+def test_add_federal_and_state_sources(api_engine: Engine) -> None:
+    """A layer can have one federal source and one source per state."""
+    federal = client.post(URL, json=PLACES_SOURCE)
+    texas = client.post(
+        URL, json={**PLACES_SOURCE, "state": "TX", "download_url": "https://tx.example.com/a.zip"}
     )
 
-    assert response.status_code == 201
-    body = response.json()
-    assert body["id"] > 0
-    assert body["layer"] == "hydro.wetlands"
-    assert body["state"] == "TX"
-    assert body["download_url"] == TX_URL
-    assert body["format"] == "gpkg"
-    assert body["license"] is None
-    assert body["attribution"] is None
-    assert body["is_enabled"] is True
-    assert body["updated_at"]
-
-
-@pytest.mark.usefixtures("api_engine")
-def test_create_source_rejects_layer_without_loader() -> None:
-    """A layer no loader handles answers 422 and saves nothing."""
-    response = client.post(
-        "/api/v1/reference/sources",
-        json={"layer": "hydro.nothing", "state": "TX", "download_url": TX_URL, "format": "gpkg"},
-    )
-
-    assert response.status_code == 422
-    assert response.json() == {"detail": "No loader for layer 'hydro.nothing'"}
-    assert client.get("/api/v1/reference/sources").json() == []
-
-
-@pytest.mark.usefixtures("api_engine")
-@pytest.mark.parametrize("state", ["tx", "TEX", "T"])
-def test_create_source_rejects_bad_state(state: str) -> None:
-    """The state must be a two-letter uppercase code."""
-    response = client.post(
-        "/api/v1/reference/sources",
-        json={"layer": "hydro.wetlands", "state": state, "download_url": TX_URL, "format": "gpkg"},
-    )
-
-    assert response.status_code == 422
-
-
-@pytest.mark.usefixtures("api_engine")
-def test_create_source_rejects_unknown_state() -> None:
-    """The state must be one of the state codes Atlas knows."""
-    response = client.post(
-        "/api/v1/reference/sources",
-        json={"layer": "hydro.wetlands", "state": "XX", "download_url": TX_URL, "format": "gpkg"},
-    )
-
-    assert response.status_code == 422
-    assert response.json() == {"detail": "Unknown state code 'XX'"}
-
-
-@pytest.mark.usefixtures("api_engine")
-def test_create_source_rejects_non_http_url() -> None:
-    """The download link must be an http or https URL."""
-    response = client.post(
-        "/api/v1/reference/sources",
-        json={
-            "layer": "hydro.wetlands",
-            "state": "TX",
-            "download_url": "ftp://example.com/TX.zip",
-            "format": "gpkg",
-        },
-    )
-
-    assert response.status_code == 422
-
-
-def test_create_source_rejects_duplicate(api_engine: Engine) -> None:
-    """A layer can have only one source per state."""
-    add_source(api_engine, "TX", TX_URL)
-
-    response = client.post(
-        "/api/v1/reference/sources",
-        json={"layer": "hydro.wetlands", "state": "TX", "download_url": TX_URL, "format": "gpkg"},
-    )
-
-    assert response.status_code == 409
-    assert response.json() == {"detail": "hydro.wetlands already has a source for TX"}
-
-
-def test_list_sources(api_engine: Engine) -> None:
-    """Sources are listed by layer, then state."""
-    add_source(api_engine, "TX", TX_URL)
-    add_source(api_engine, "LA", LA_URL, is_enabled=False)
-
-    response = client.get("/api/v1/reference/sources")
-
-    assert response.status_code == 200
-    assert [(s["state"], s["is_enabled"]) for s in response.json()] == [
-        ("LA", False),
-        ("TX", True),
+    assert federal.status_code == 201
+    assert federal.json()["state"] is None
+    assert texas.status_code == 201
+    assert texas.json()["state"] == "TX"
+    listed = client.get(URL).json()
+    assert [(item["layer"], item["state"]) for item in listed] == [
+        ("boundaries.places", None),
+        ("boundaries.places", "TX"),
     ]
 
 
-def test_update_source(api_engine: Engine) -> None:
-    """Only the fields sent are changed."""
-    add_source(api_engine, "TX", TX_URL)
-    source_id = client.get("/api/v1/reference/sources").json()[0]["id"]
-    new_url = "https://example.com/new/TX_geopackage_wetlands.zip"
+def test_second_federal_source_conflicts(api_engine: Engine) -> None:
+    """A layer can't have two federal sources."""
+    client.post(URL, json=PLACES_SOURCE)
 
-    response = client.patch(
-        f"/api/v1/reference/sources/{source_id}",
-        json={"download_url": new_url, "is_enabled": False},
-    )
+    response = client.post(URL, json=PLACES_SOURCE)
+
+    assert response.status_code == 409
+    assert response.json() == {"detail": "boundaries.places already has a federal source"}
+
+
+def test_second_state_source_conflicts(api_engine: Engine) -> None:
+    """A layer can't have two sources for the same state."""
+    client.post(URL, json={**PLACES_SOURCE, "state": "TX"})
+
+    response = client.post(URL, json={**PLACES_SOURCE, "state": "TX"})
+
+    assert response.status_code == 409
+    assert response.json() == {"detail": "boundaries.places already has a source for TX"}
+
+
+def test_unknown_layer(api_engine: Engine) -> None:
+    """A source for a table that isn't a layer is rejected."""
+    response = client.post(URL, json={**PLACES_SOURCE, "layer": "public.load_runs"})
+
+    assert response.status_code == 422
+    assert response.json() == {"detail": "No layer named 'public.load_runs'"}
+
+
+def test_unknown_state(api_engine: Engine) -> None:
+    """A state code that isn't a state is rejected."""
+    response = client.post(URL, json={**PLACES_SOURCE, "state": "ZZ"})
+
+    assert response.status_code == 422
+    assert response.json() == {"detail": "Unknown state code 'ZZ'"}
+
+
+def test_unknown_access_type(api_engine: Engine) -> None:
+    """The access type must be file or service."""
+    response = client.post(URL, json={**PLACES_SOURCE, "access_type": "ftp"})
+
+    assert response.status_code == 422
+
+
+def test_edit_source(api_engine: Engine) -> None:
+    """Editing a source changes only the fields sent."""
+    created = client.post(URL, json=PLACES_SOURCE).json()
+    new_url = "https://example.com/TIGER2027/tl_2027_{fips}_place.zip"
+
+    response = client.patch(f"{URL}/{created['id']}", json={"download_url": new_url})
 
     assert response.status_code == 200
-    body = response.json()
-    assert body["download_url"] == new_url
-    assert body["is_enabled"] is False
-    assert body["format"] == "gpkg"
-    assert (body["layer"], body["state"]) == ("hydro.wetlands", "TX")
+    assert response.json()["download_url"] == new_url
+    assert response.json()["field_mapping"] == PLACES_SOURCE["field_mapping"]
 
 
-@pytest.mark.usefixtures("api_engine")
-def test_update_missing_source() -> None:
-    """Updating a source that doesn't exist answers 404."""
-    response = client.patch("/api/v1/reference/sources/999999", json={"is_enabled": False})
+def test_edit_missing_source(api_engine: Engine) -> None:
+    """Editing a source that doesn't exist answers 404."""
+    response = client.patch(f"{URL}/999999", json={"is_enabled": False})
 
     assert response.status_code == 404
-    assert response.json() == {"detail": "No source with id 999999"}
 
 
-def test_enabled_sources_skips_disabled_rows(api_engine: Engine) -> None:
-    """Only enabled sources are loaded, ordered by state."""
-    add_source(api_engine, "TX", TX_URL)
-    add_source(api_engine, "OK", "https://example.com/OK.zip")
-    add_source(api_engine, "LA", LA_URL, is_enabled=False)
+def test_check_bad_link(api_engine: Engine) -> None:
+    """A link that can't be opened answers 422 with the reason."""
+    response = client.post(
+        f"{URL}/check",
+        json={
+            "layer": "boundaries.places",
+            "state": "TX",
+            "download_url": "http://127.0.0.1:9/none.zip",
+        },
+    )
 
-    sources = enabled_sources(api_engine, "hydro.wetlands")
-
-    assert [source.state for source in sources] == ["OK", "TX"]
-
-
-def test_enabled_sources_for_one_state(api_engine: Engine) -> None:
-    """Passing a state returns only that state's enabled source."""
-    add_source(api_engine, "TX", TX_URL)
-    add_source(api_engine, "LA", LA_URL)
-
-    sources = enabled_sources(api_engine, "hydro.wetlands", "LA")
-
-    assert [(source.state, source.download_url) for source in sources] == [("LA", LA_URL)]
+    assert response.status_code == 422

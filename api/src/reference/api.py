@@ -1,8 +1,8 @@
-"""Reference database endpoints.
+"""Reference database endpoints, used by the admin page.
 
-- ``/loads``: start loads. The admin page's Load buttons call these; until that page
-  exists, they are run from the API's ``/docs`` page.
-- ``/sources``: add, list, and edit the download links in ``public.sources``.
+- ``/loads``: load a list of layer and state pairs, the admin page's **Load** button.
+- ``/sources``: list, add, and edit sources.
+- ``/sources/check``: open a link and match its fields to a layer, before saving.
 """
 
 from collections.abc import Sequence
@@ -11,15 +11,21 @@ from typing import Annotated
 
 import httpx
 import structlog
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Path, status
+from fastapi import APIRouter, BackgroundTasks, Body, Depends, HTTPException, status
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import Engine, func, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from src.core.database import reference_engine
-from src.reference.load import LayerSource, Loader, LoadError, enabled_sources, run_loads
-from src.reference.loaders import LOADERS
+from src.reference.load import (
+    Load,
+    LoadError,
+    check_link,
+    layer_table,
+    plan_load,
+    run_loads,
+)
 from src.reference.models.public import Source
 from src.reference.state_codes import STATE_FIPS
 
@@ -29,57 +35,86 @@ router = APIRouter(prefix="/reference", tags=["reference"])
 
 STATE_PATTERN = r"^[A-Z]{2}$"
 URL_PATTERN = r"^https?://"
-
-State = Annotated[str, Path(pattern=STATE_PATTERN, description="Two-letter code, e.g. TX")]
-
-
-class LoadStarted(BaseModel):
-    """Response when a load has been started.
-
-    Attributes:
-        layer: The layer being loaded, such as ``wetlands``.
-        states: The states being loaded, in load order.
-    """
-
-    layer: str
-    states: list[str]
+ACCESS_TYPE_PATTERN = r"^(file|service)$"
 
 
-class SourceCreate(BaseModel):
-    """A new download link for one layer and state.
+class LoadRequest(BaseModel):
+    """One layer and state to load, one checked box on the admin page.
 
     Attributes:
-        layer: Layer name, such as ``hydro.wetlands``.
+        layer: Layer name, such as ``boundaries.places``.
         state: Two-letter state code, such as ``TX``.
-        download_url: Link to the source file.
-        format: Dataset format inside the download, such as ``gpkg``.
-        license: Source license.
-        attribution: Required attribution text.
-        is_enabled: Whether loads include this source.
     """
 
     layer: str
     state: str = Field(pattern=STATE_PATTERN)
+
+
+class LoadsStarted(BaseModel):
+    """Response when loads have been started.
+
+    Attributes:
+        loads: The layer and state pairs being loaded.
+    """
+
+    loads: list[LoadRequest]
+
+
+class SourceCreate(BaseModel):
+    """A new source, usually a state source from the **Add source** form.
+
+    Attributes:
+        layer: Layer name, such as ``hydro.wetlands``.
+        state: Two-letter state code, or ``None`` for a federal source.
+        download_url: Link, which may hold ``{state}`` and ``{fips}``.
+        access_type: ``file`` or ``service``.
+        format: GDAL format name, such as ``GPKG``.
+        source_layer: Layer name inside the dataset, or ``None`` for its only layer.
+        field_mapping: Final column to provider field.
+        keep: Provider field to the values to keep, or ``None`` to keep every row.
+        clip_to_state: Whether to cut the data at the state line.
+        license: Source license.
+        attribution: Required attribution text.
+        is_enabled: Whether loads use this source.
+    """
+
+    layer: str
+    state: str | None = Field(default=None, pattern=STATE_PATTERN)
     download_url: str = Field(pattern=URL_PATTERN)
+    access_type: str = Field(pattern=ACCESS_TYPE_PATTERN)
     format: str = Field(min_length=1)
+    source_layer: str | None = None
+    field_mapping: dict[str, str] = Field(min_length=1)
+    keep: dict[str, list[str]] | None = None
+    clip_to_state: bool = False
     license: str | None = None
     attribution: str | None = None
     is_enabled: bool = True
 
 
 class SourceUpdate(BaseModel):
-    """Changes to an existing source. Only the fields sent are changed.
+    """Changes to a source from the **Edit source** form. Only the fields sent change.
 
     Attributes:
-        download_url: Link to the source file.
-        format: Dataset format inside the download, such as ``gpkg``.
+        download_url: Link, which may hold ``{state}`` and ``{fips}``.
+        access_type: ``file`` or ``service``.
+        format: GDAL format name, such as ``GPKG``.
+        source_layer: Layer name inside the dataset, or ``None`` for its only layer.
+        field_mapping: Final column to provider field.
+        keep: Provider field to the values to keep, or ``None`` to keep every row.
+        clip_to_state: Whether to cut the data at the state line.
         license: Source license.
         attribution: Required attribution text.
-        is_enabled: Whether loads include this source.
+        is_enabled: Whether loads use this source.
     """
 
     download_url: str | None = Field(default=None, pattern=URL_PATTERN)
+    access_type: str | None = Field(default=None, pattern=ACCESS_TYPE_PATTERN)
     format: str | None = Field(default=None, min_length=1)
+    source_layer: str | None = None
+    field_mapping: dict[str, str] | None = Field(default=None, min_length=1)
+    keep: dict[str, list[str]] | None = None
+    clip_to_state: bool | None = None
     license: str | None = None
     attribution: str | None = None
     is_enabled: bool | None = None
@@ -91,12 +126,17 @@ class SourceRead(BaseModel):
     Attributes:
         id: Row id.
         layer: Layer name, such as ``hydro.wetlands``.
-        state: Two-letter state code.
-        download_url: Link to the source file.
-        format: Dataset format inside the download.
+        state: Two-letter state code, or ``None`` for a federal source.
+        download_url: Link, which may hold ``{state}`` and ``{fips}``.
+        access_type: ``file`` or ``service``.
+        format: GDAL format name.
+        source_layer: Layer name inside the dataset.
+        field_mapping: Final column to provider field.
+        keep: Provider field to the values to keep.
+        clip_to_state: Whether the data is cut at the state line.
         license: Source license.
         attribution: Required attribution text.
-        is_enabled: Whether loads include this source.
+        is_enabled: Whether loads use this source.
         updated_at: When the row was last changed.
     """
 
@@ -104,13 +144,63 @@ class SourceRead(BaseModel):
 
     id: int
     layer: str
-    state: str
+    state: str | None
     download_url: str
+    access_type: str
     format: str
+    source_layer: str | None
+    field_mapping: dict[str, str]
+    keep: dict[str, list[str]] | None
+    clip_to_state: bool
     license: str | None
     attribution: str | None
     is_enabled: bool
     updated_at: datetime
+
+
+class CheckRequest(BaseModel):
+    """A link to open before saving it, from the **Check link** button.
+
+    Attributes:
+        layer: Layer name, such as ``boundaries.places``.
+        state: Two-letter state code used to fill ``{state}`` and ``{fips}``.
+        download_url: Link, which may hold ``{state}`` and ``{fips}``.
+        access_type: ``file`` or ``service``.
+    """
+
+    layer: str
+    state: str = Field(pattern=STATE_PATTERN)
+    download_url: str = Field(pattern=URL_PATTERN)
+    access_type: str = Field(default="file", pattern=ACCESS_TYPE_PATTERN)
+
+
+class CheckedLayer(BaseModel):
+    """One layer found in the link.
+
+    Attributes:
+        name: The layer's name.
+        fields: The layer's field names.
+    """
+
+    name: str
+    fields: list[str]
+
+
+class CheckResult(BaseModel):
+    """What the link holds and how its fields match the layer's columns.
+
+    Attributes:
+        format: GDAL format name, such as ``GPKG``.
+        layers: Every layer in the link.
+        source_layer: The layer to load, or ``None`` when it can't be picked.
+        field_mapping: Column to matched field, or ``None`` when nothing matched. The
+            admin page shows a dropdown of the layer's fields for those.
+    """
+
+    format: str
+    layers: list[CheckedLayer]
+    source_layer: str | None
+    field_mapping: dict[str, str | None]
 
 
 def get_reference_engine() -> Engine:
@@ -121,105 +211,85 @@ def get_reference_engine() -> Engine:
 ReferenceEngine = Annotated[Engine, Depends(get_reference_engine)]
 
 
-def get_loader(layer: str) -> Loader:
-    """Return the loader for a layer route name.
-
-    Raises:
-        HTTPException: 404 when there is no loader for the layer.
-    """
-    loader = LOADERS.get(layer)
-    if loader is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, f"No loader for layer '{layer}'")
-    return loader
-
-
-def run_background_loads(layer: str, engine: Engine, sources: Sequence[LayerSource]) -> None:
-    """Run a layer's loads in the background.
+def run_background_loads(engine: Engine, loads: Sequence[Load]) -> None:
+    """Run the requested loads in the background.
 
     Each load records its outcome in ``public.load_runs`` and logs any failure, so a
     failure is not raised again here.
 
     Args:
-        layer: Layer route name, such as ``wetlands``.
         engine: Engine for the reference database.
-        sources: The loads to run, one per state.
+        loads: The loads to run, one per layer and state.
     """
     try:
-        run_loads(engine, sources)
+        run_loads(engine, loads)
     except LoadError, httpx.HTTPError, OSError, SQLAlchemyError:
-        log.warning("background_load_failed", layer=layer)
-
-
-def start_loads(
-    layer: str, loader: Loader, sources: list[Source], engine: Engine, tasks: BackgroundTasks
-) -> LoadStarted:
-    """Queue the loads for the given sources and describe what was started."""
-    layer_sources = [loader.layer_source(source) for source in sources]
-    tasks.add_task(run_background_loads, layer, engine, layer_sources)
-    return LoadStarted(layer=layer, states=[source.state for source in sources])
-
-
-@router.post("/loads/{layer}", status_code=status.HTTP_202_ACCEPTED)
-def start_layer_load(
-    layer: str, background_tasks: BackgroundTasks, engine: ReferenceEngine
-) -> LoadStarted:
-    """Load every enabled state of a layer. Returns right away; loads run in the background.
-
-    States load one at a time, in state order. Results are recorded in
-    ``public.load_runs``.
-
-    Args:
-        layer: Layer name, such as ``wetlands``.
-        background_tasks: FastAPI's background task list.
-        engine: Engine for the reference database.
-
-    Returns:
-        The layer and the states being loaded.
-
-    Raises:
-        HTTPException: 404 when there is no loader for the layer, or it has no enabled
-            sources.
-    """
-    loader = get_loader(layer)
-    sources = enabled_sources(engine, loader.layer)
-    if not sources:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, f"No enabled sources for {loader.layer}")
-    return start_loads(layer, loader, sources, engine, background_tasks)
-
-
-@router.post("/loads/{layer}/{state}", status_code=status.HTTP_202_ACCEPTED)
-def start_state_load(
-    layer: str, state: State, background_tasks: BackgroundTasks, engine: ReferenceEngine
-) -> LoadStarted:
-    """Load one state of a layer. Returns right away; the load runs in the background.
-
-    The result is recorded in ``public.load_runs``.
-
-    Args:
-        layer: Layer name, such as ``wetlands``.
-        state: Two-letter state code, such as ``TX``.
-        background_tasks: FastAPI's background task list.
-        engine: Engine for the reference database.
-
-    Returns:
-        The layer and the state being loaded.
-
-    Raises:
-        HTTPException: 404 when there is no loader for the layer, or no enabled source
-            for the state.
-    """
-    loader = get_loader(layer)
-    sources = enabled_sources(engine, loader.layer, state)
-    if not sources:
-        raise HTTPException(
-            status.HTTP_404_NOT_FOUND, f"No enabled source for {loader.layer} in {state}"
+        log.warning(
+            "background_load_failed",
+            loads=[f"{load.layer}:{load.state}" for load in loads],
         )
-    return start_loads(layer, loader, sources, engine, background_tasks)
+
+
+def check_layer_and_state(layer: str, state: str | None) -> None:
+    """Raise 422 when the layer or the state code is unknown.
+
+    Args:
+        layer: Layer name, such as ``hydro.wetlands``.
+        state: Two-letter state code, or ``None``.
+
+    Raises:
+        HTTPException: 422 for an unknown layer or state code.
+    """
+    if layer_table(layer) is None:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, f"No layer named '{layer}'")
+    if state is not None and state not in STATE_FIPS:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, f"Unknown state code '{state}'")
+
+
+@router.post("/loads", status_code=status.HTTP_202_ACCEPTED)
+def start_loads(
+    body: Annotated[list[LoadRequest], Body(min_length=1)],
+    background_tasks: BackgroundTasks,
+    engine: ReferenceEngine,
+) -> LoadsStarted:
+    """Load a list of layer and state pairs. Returns right away; loads run in the background.
+
+    Pairs that share a link, such as several states from one national file, are loaded
+    from a single download. Results are recorded in ``public.load_runs``, one row per
+    layer and state.
+
+    Args:
+        body: The layer and state pairs to load. Repeated pairs are loaded once.
+        background_tasks: FastAPI's background task list.
+        engine: Engine for the reference database.
+
+    Returns:
+        The layer and state pairs being loaded.
+
+    Raises:
+        HTTPException: 422 listing every pair that can't be loaded. Nothing is started
+            when any pair has a problem.
+    """
+    pairs = list(dict.fromkeys((item.layer, item.state) for item in body))
+    problems: list[str] = []
+    loads: list[Load] = []
+
+    for layer, state in pairs:
+        try:
+            loads.append(plan_load(engine, layer, state))
+        except LoadError as error:
+            problems.append(str(error))
+
+    if problems:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, problems)
+
+    background_tasks.add_task(run_background_loads, engine, loads)
+    return LoadsStarted(loads=[LoadRequest(layer=layer, state=state) for layer, state in pairs])
 
 
 @router.get("/sources")
 def list_sources(engine: ReferenceEngine) -> list[SourceRead]:
-    """List every source, by layer and then state.
+    """List every source, by layer, federal first, then by state.
 
     Args:
         engine: Engine for the reference database.
@@ -227,14 +297,14 @@ def list_sources(engine: ReferenceEngine) -> list[SourceRead]:
     Returns:
         All ``public.sources`` rows.
     """
+    query = select(Source).order_by(Source.layer, Source.state.nulls_first())
     with Session(engine) as session:
-        sources = session.scalars(select(Source).order_by(Source.layer, Source.state))
-        return [SourceRead.model_validate(source) for source in sources]
+        return [SourceRead.model_validate(source) for source in session.scalars(query)]
 
 
 @router.post("/sources", status_code=status.HTTP_201_CREATED)
 def create_source(body: SourceCreate, engine: ReferenceEngine) -> SourceRead:
-    """Add the download link for one layer and state.
+    """Add a source.
 
     Args:
         body: The new source.
@@ -244,26 +314,21 @@ def create_source(body: SourceCreate, engine: ReferenceEngine) -> SourceRead:
         The saved source.
 
     Raises:
-        HTTPException: 422 when no loader handles the layer or the state code is unknown;
-            409 when the layer already has a source for the state.
+        HTTPException: 422 for an unknown layer or state code; 409 when the layer already
+            has a source for that state, or already has a federal source.
     """
-    if body.layer not in {loader.layer for loader in LOADERS.values()}:
-        raise HTTPException(
-            status.HTTP_422_UNPROCESSABLE_CONTENT, f"No loader for layer '{body.layer}'"
-        )
-    if body.state not in STATE_FIPS:
-        raise HTTPException(
-            status.HTTP_422_UNPROCESSABLE_CONTENT, f"Unknown state code '{body.state}'"
-        )
+    check_layer_and_state(body.layer, body.state)
 
     with Session(engine) as session, session.begin():
         existing = session.scalar(
-            select(Source.id).where(Source.layer == body.layer, Source.state == body.state)
+            select(Source.id).where(
+                Source.layer == body.layer,
+                Source.state.is_(None) if body.state is None else Source.state == body.state,
+            )
         )
         if existing is not None:
-            raise HTTPException(
-                status.HTTP_409_CONFLICT, f"{body.layer} already has a source for {body.state}"
-            )
+            covers = "a federal source" if body.state is None else f"a source for {body.state}"
+            raise HTTPException(status.HTTP_409_CONFLICT, f"{body.layer} already has {covers}")
         source = Source(**body.model_dump())
         session.add(source)
         session.flush()
@@ -273,7 +338,7 @@ def create_source(body: SourceCreate, engine: ReferenceEngine) -> SourceRead:
 
 @router.patch("/sources/{source_id}")
 def update_source(source_id: int, body: SourceUpdate, engine: ReferenceEngine) -> SourceRead:
-    """Change an existing source. Only the fields sent are changed.
+    """Change a source. Only the fields sent are changed.
 
     Args:
         source_id: The source's id.
@@ -296,3 +361,35 @@ def update_source(source_id: int, body: SourceUpdate, engine: ReferenceEngine) -
         session.flush()
         session.refresh(source)
         return SourceRead.model_validate(source)
+
+
+@router.post("/sources/check")
+def check_source(body: CheckRequest, engine: ReferenceEngine) -> CheckResult:
+    """Open a link and match its fields to the layer's columns, without saving anything.
+
+    Fields are matched to the layer's current source first, then by the same name as the
+    column, ignoring case. A file link is downloaded first, so this waits for the download.
+
+    Args:
+        body: The link to check.
+        engine: Engine for the reference database.
+
+    Returns:
+        The format, layers, layer to load, and matched fields.
+
+    Raises:
+        HTTPException: 422 for an unknown layer or state code, or a link that can't be
+            opened.
+    """
+    check_layer_and_state(body.layer, body.state)
+    try:
+        checked = check_link(engine, body.layer, body.state, body.download_url, body.access_type)
+    except (LoadError, httpx.HTTPError) as error:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(error)) from error
+
+    return CheckResult(
+        format=checked.format,
+        layers=[CheckedLayer(name=item.name, fields=item.fields) for item in checked.layers],
+        source_layer=checked.source_layer,
+        field_mapping=checked.field_mapping,
+    )

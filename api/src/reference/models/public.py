@@ -11,25 +11,37 @@ from sqlalchemy import (
     UniqueConstraint,
     func,
 )
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from src.core.database import ReferenceBase
 
 
 class Source(ReferenceBase):
-    """Where each layer is downloaded from, per state. Maintainers edit rows."""
+    """Where a layer comes from and how to read it.
+
+    A source with no ``state`` is federal and covers every state. A source with a
+    ``state`` covers only that state. A load uses the state source if there is one,
+    otherwise the federal source.
+    """
 
     __tablename__ = "sources"
     __table_args__ = (
-        UniqueConstraint("layer", "state"),
+        UniqueConstraint("layer", "state", postgresql_nulls_not_distinct=True),
+        CheckConstraint("access_type IN ('file', 'service')", name="access_type"),
         {"schema": "public"},
     )
 
     id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
     layer: Mapped[str]
-    state: Mapped[str]
+    state: Mapped[str | None]
     download_url: Mapped[str]
+    access_type: Mapped[str]
     format: Mapped[str]
+    source_layer: Mapped[str | None]
+    field_mapping: Mapped[dict[str, str]] = mapped_column(JSONB)
+    keep: Mapped[dict[str, list[str]] | None] = mapped_column(JSONB)
+    clip_to_state: Mapped[bool] = mapped_column(server_default="false")
     license: Mapped[str | None]
     attribution: Mapped[str | None]
     is_enabled: Mapped[bool] = mapped_column(server_default="true")

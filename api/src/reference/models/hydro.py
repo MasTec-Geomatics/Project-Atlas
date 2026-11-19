@@ -3,7 +3,7 @@
 from decimal import Decimal
 
 from geoalchemy2 import Geometry, WKBElement
-from sqlalchemy import BigInteger, Identity, Index
+from sqlalchemy import BigInteger, Identity, Index, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from src.core.database import ReferenceBase
@@ -35,13 +35,14 @@ class Flowline(ReferenceBase):
 
     __tablename__ = "flowlines"
     __table_args__ = (
+        UniqueConstraint("state", "id3dhp"),
         Index("flowlines_geom_idx", "geom", postgresql_using="gist"),
         {"schema": SCHEMA},
     )
 
     id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
-    state: Mapped[str] = mapped_column(index=True)
-    id3dhp: Mapped[str] = mapped_column(unique=True)
+    state: Mapped[str]
+    id3dhp: Mapped[str]
     name: Mapped[str | None]
     feature_type: Mapped[str]
     geom: Mapped[WKBElement] = mapped_column(
@@ -54,13 +55,14 @@ class Waterbody(ReferenceBase):
 
     __tablename__ = "waterbodies"
     __table_args__ = (
+        UniqueConstraint("state", "id3dhp"),
         Index("waterbodies_geom_idx", "geom", postgresql_using="gist"),
         {"schema": SCHEMA},
     )
 
     id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
-    state: Mapped[str] = mapped_column(index=True)
-    id3dhp: Mapped[str] = mapped_column(unique=True)
+    state: Mapped[str]
+    id3dhp: Mapped[str]
     name: Mapped[str | None]
     feature_type: Mapped[str]
     geom: Mapped[WKBElement] = mapped_column(
