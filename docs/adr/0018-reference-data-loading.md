@@ -1,6 +1,6 @@
 # 0018. Reference Data Loading
 
-**Status:** Accepted **Date:** 2026-11-12 **Updated:** 2026-11-18
+**Status:** Accepted **Date:** 2026-11-12 **Updated:** 2026-11-19
 
 ## Context
 
@@ -80,11 +80,33 @@ runs weekly and records the result in `public.source_checks`. A check never star
 
 ### Maintainer Admin Page
 
-- **Load:** a table of states by layers, with a state filter and one **Load** button.
-- **Edit source:** paste a new link and click **Check link**. Atlas fills in the format, layer, and fields. Only an
-  unmatched field needs a pick from a dropdown. **Save** sends `PATCH /api/v1/reference/sources/{id}`.
-- **Add source:** pick the layer and the state, paste the link, and check it the same way. **Save** sends
-  `POST /api/v1/reference/sources`.
+**Load:**
+
+- An **Add a state** box finds a state by full name or code (for example "North Carolina" or "NC"). Each state added
+  becomes a row; only the states needed are listed.
+- One column per layer, with a checkbox in each box.
+- The page shows how many loads are selected, and one **Load** button sends them all.
+- While a box's load is `running`, it shows a moving progress bar. When it ends, it shows `succeeded` with the row
+  count, or `failed` with the error. The page asks for load status every few seconds while a load is running.
+
+**Edit source:** paste a new link and click **Check link**. Atlas fills in the format, layer, and fields. Only an
+unmatched field needs a pick from a dropdown. **Save** sends `PATCH /api/v1/reference/sources/{id}`.
+
+**Add source:** pick the layer and the state, paste the link, and check it the same way. **Save** sends
+`POST /api/v1/reference/sources`.
+
+### Endpoints
+
+| Endpoint                               | Used for                                             |
+|----------------------------------------|------------------------------------------------------|
+| `GET /api/v1/reference/states`         | Each state's code and full name, for **Add a state** |
+| `GET /api/v1/reference/layers`         | Every layer, one column each                         |
+| `GET /api/v1/reference/loads`          | The last load of each layer and state                |
+| `POST /api/v1/reference/loads`         | The **Load** button                                  |
+| `GET /api/v1/reference/sources`        | Every source                                         |
+| `POST /api/v1/reference/sources`       | **Add source**                                       |
+| `PATCH /api/v1/reference/sources/{id}` | **Edit source**                                      |
+| `POST /api/v1/reference/sources/check` | **Check link**                                       |
 
 ## Consequences
 
