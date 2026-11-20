@@ -12,7 +12,8 @@
     "fmt:fix": "vp fmt",
     "pre-commit": "vp lint --fix && vp fmt",
     "preview": "vp preview",
-    "api:generate": "orval"
+    "api:generate": "orval",
+    "test": "vp test"
   },
   "dependencies": {
     "@mantine/core": "^9.8.1",

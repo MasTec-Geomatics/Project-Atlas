@@ -38,6 +38,10 @@ export default defineConfig({
     resolve: {
         tsconfigPaths: true,
     },
+    test: {
+        environment: "jsdom",
+        setupFiles: ["./src/test/setup.ts"],
+    },
     server: {
         proxy: {
             "/api": "http://localhost:8000",
