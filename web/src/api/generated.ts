@@ -24,6 +24,7 @@ import type {
 } from '@tanstack/react-query';
 
 import { customFetch } from './fetcher';
+import type { ErrorType } from './fetcher';
 /**
  * A link to open before saving it, from the **Check link** button.
  *
@@ -258,7 +259,7 @@ export interface StateRead {
   name: string;
 }
 
-export type HealthCheckApiHealthGet200 = {[key: string]: string};
+export type HealthHealthCheck200 = {[key: string]: string};
 
 type SecondParameter<T extends (...args: never) => unknown> = Parameters<T>[1];
 
@@ -299,19 +300,19 @@ const withQueryKey = <T extends object, K>(query: T, queryKey: K): T & { queryKe
   return result;
 };
 
-export type healthCheckApiHealthGetResponse200 = {
-  data: HealthCheckApiHealthGet200
+export type healthHealthCheckResponse200 = {
+  data: HealthHealthCheck200
   status: 200
 }
 
-export type healthCheckApiHealthGetResponseSuccess = (healthCheckApiHealthGetResponse200) & {
+export type healthHealthCheckResponseSuccess = (healthHealthCheckResponse200) & {
   headers: Headers;
 };
 ;
 
-export type healthCheckApiHealthGetResponse = (healthCheckApiHealthGetResponseSuccess)
+export type healthHealthCheckResponse = (healthHealthCheckResponseSuccess)
 
-export const getHealthCheckApiHealthGetUrl = () => {
+export const getHealthHealthCheckUrl = () => {
 
 
 
@@ -322,9 +323,9 @@ export const getHealthCheckApiHealthGetUrl = () => {
 /**
  * @summary Health Check
  */
-export const healthCheckApiHealthGet = async ( options?: Parameters<typeof customFetch>[1]): Promise<healthCheckApiHealthGetResponse> => {
+export const healthHealthCheck = async ( options?: Parameters<typeof customFetch>[1]): Promise<healthHealthCheckResponse> => {
 
-  return customFetch<healthCheckApiHealthGetResponse>(getHealthCheckApiHealthGetUrl(),
+  return customFetch<healthHealthCheckResponse>(getHealthHealthCheckUrl(),
   {
     ...options,
     method: 'GET'
@@ -337,69 +338,69 @@ export const healthCheckApiHealthGet = async ( options?: Parameters<typeof custo
 
 
 
-export const getHealthCheckApiHealthGetQueryKey = () => {
+export const getHealthHealthCheckQueryKey = () => {
     return [
     `/api/health`
     ] as const;
     }
 
 
-export const getHealthCheckApiHealthGetQueryOptions = <TData = Awaited<ReturnType<typeof healthCheckApiHealthGet>>, TError = unknown>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof healthCheckApiHealthGet>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+export const getHealthHealthCheckQueryOptions = <TData = Awaited<ReturnType<typeof healthHealthCheck>>, TError = ErrorType<unknown>>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof healthHealthCheck>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
 ) => {
 
 const {query: queryOptions, request: requestOptions} = options ?? {};
 
-  const queryKey =  queryOptions?.queryKey ?? getHealthCheckApiHealthGetQueryKey();
+  const queryKey =  queryOptions?.queryKey ?? getHealthHealthCheckQueryKey();
 
 
 
-    const queryFn: QueryFunction<Awaited<ReturnType<typeof healthCheckApiHealthGet>>> = ({ signal }) => healthCheckApiHealthGet({ signal, ...requestOptions });
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof healthHealthCheck>>> = ({ signal }) => healthHealthCheck({ signal, ...requestOptions });
 
 
 
 
 
-   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof healthCheckApiHealthGet>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof healthHealthCheck>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
 }
 
-export type HealthCheckApiHealthGetQueryResult = NonNullable<Awaited<ReturnType<typeof healthCheckApiHealthGet>>>
-export type HealthCheckApiHealthGetQueryError = unknown
+export type HealthHealthCheckQueryResult = NonNullable<Awaited<ReturnType<typeof healthHealthCheck>>>
+export type HealthHealthCheckQueryError = ErrorType<unknown>
 
 
 /** @summary Health Check */
-export function useHealthCheckApiHealthGet<TData = Awaited<ReturnType<typeof healthCheckApiHealthGet>>, TError = unknown>(
-  options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof healthCheckApiHealthGet>>, TError, TData>> & Pick<
+export function useHealthHealthCheck<TData = Awaited<ReturnType<typeof healthHealthCheck>>, TError = ErrorType<unknown>>(
+  options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof healthHealthCheck>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
-          Awaited<ReturnType<typeof healthCheckApiHealthGet>>,
+          Awaited<ReturnType<typeof healthHealthCheck>>,
           TError,
-          Awaited<ReturnType<typeof healthCheckApiHealthGet>>
+          Awaited<ReturnType<typeof healthHealthCheck>>
         > , 'initialData'
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /** @summary Health Check */
-export function useHealthCheckApiHealthGet<TData = Awaited<ReturnType<typeof healthCheckApiHealthGet>>, TError = unknown>(
-  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof healthCheckApiHealthGet>>, TError, TData>> & Pick<
+export function useHealthHealthCheck<TData = Awaited<ReturnType<typeof healthHealthCheck>>, TError = ErrorType<unknown>>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof healthHealthCheck>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
-          Awaited<ReturnType<typeof healthCheckApiHealthGet>>,
+          Awaited<ReturnType<typeof healthHealthCheck>>,
           TError,
-          Awaited<ReturnType<typeof healthCheckApiHealthGet>>
+          Awaited<ReturnType<typeof healthHealthCheck>>
         > , 'initialData'
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /** @summary Health Check */
-export function useHealthCheckApiHealthGet<TData = Awaited<ReturnType<typeof healthCheckApiHealthGet>>, TError = unknown>(
-  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof healthCheckApiHealthGet>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+export function useHealthHealthCheck<TData = Awaited<ReturnType<typeof healthHealthCheck>>, TError = ErrorType<unknown>>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof healthHealthCheck>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /** @summary Health Check */
-export function useHealthCheckApiHealthGet<TData = Awaited<ReturnType<typeof healthCheckApiHealthGet>>, TError = unknown>(
-  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof healthCheckApiHealthGet>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+export function useHealthHealthCheck<TData = Awaited<ReturnType<typeof healthHealthCheck>>, TError = ErrorType<unknown>>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof healthHealthCheck>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
-  const queryOptions = getHealthCheckApiHealthGetQueryOptions(options)
+  const queryOptions = getHealthHealthCheckQueryOptions(options)
 
   const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
 
@@ -412,19 +413,19 @@ export function useHealthCheckApiHealthGet<TData = Awaited<ReturnType<typeof hea
 
 
 
-export type listStatesApiV1ReferenceStatesGetResponse200 = {
+export type referenceListStatesResponse200 = {
   data: StateRead[]
   status: 200
 }
 
-export type listStatesApiV1ReferenceStatesGetResponseSuccess = (listStatesApiV1ReferenceStatesGetResponse200) & {
+export type referenceListStatesResponseSuccess = (referenceListStatesResponse200) & {
   headers: Headers;
 };
 ;
 
-export type listStatesApiV1ReferenceStatesGetResponse = (listStatesApiV1ReferenceStatesGetResponseSuccess)
+export type referenceListStatesResponse = (referenceListStatesResponseSuccess)
 
-export const getListStatesApiV1ReferenceStatesGetUrl = () => {
+export const getReferenceListStatesUrl = () => {
 
 
 
@@ -439,9 +440,9 @@ export const getListStatesApiV1ReferenceStatesGetUrl = () => {
  *     The 50 states and the District of Columbia.
  * @summary List States
  */
-export const listStatesApiV1ReferenceStatesGet = async ( options?: Parameters<typeof customFetch>[1]): Promise<listStatesApiV1ReferenceStatesGetResponse> => {
+export const referenceListStates = async ( options?: Parameters<typeof customFetch>[1]): Promise<referenceListStatesResponse> => {
 
-  return customFetch<listStatesApiV1ReferenceStatesGetResponse>(getListStatesApiV1ReferenceStatesGetUrl(),
+  return customFetch<referenceListStatesResponse>(getReferenceListStatesUrl(),
   {
     ...options,
     method: 'GET'
@@ -454,33 +455,33 @@ export const listStatesApiV1ReferenceStatesGet = async ( options?: Parameters<ty
 
 
 
-export const getListStatesApiV1ReferenceStatesGetQueryKey = () => {
+export const getReferenceListStatesQueryKey = () => {
     return [
     `/api/v1/reference/states`
     ] as const;
     }
 
 
-export const getListStatesApiV1ReferenceStatesGetQueryOptions = <TData = Awaited<ReturnType<typeof listStatesApiV1ReferenceStatesGet>>, TError = unknown>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listStatesApiV1ReferenceStatesGet>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+export const getReferenceListStatesQueryOptions = <TData = Awaited<ReturnType<typeof referenceListStates>>, TError = ErrorType<unknown>>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof referenceListStates>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
 ) => {
 
 const {query: queryOptions, request: requestOptions} = options ?? {};
 
-  const queryKey =  queryOptions?.queryKey ?? getListStatesApiV1ReferenceStatesGetQueryKey();
+  const queryKey =  queryOptions?.queryKey ?? getReferenceListStatesQueryKey();
 
 
 
-    const queryFn: QueryFunction<Awaited<ReturnType<typeof listStatesApiV1ReferenceStatesGet>>> = ({ signal }) => listStatesApiV1ReferenceStatesGet({ signal, ...requestOptions });
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof referenceListStates>>> = ({ signal }) => referenceListStates({ signal, ...requestOptions });
 
 
 
 
 
-   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listStatesApiV1ReferenceStatesGet>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof referenceListStates>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
 }
 
-export type ListStatesApiV1ReferenceStatesGetQueryResult = NonNullable<Awaited<ReturnType<typeof listStatesApiV1ReferenceStatesGet>>>
-export type ListStatesApiV1ReferenceStatesGetQueryError = unknown
+export type ReferenceListStatesQueryResult = NonNullable<Awaited<ReturnType<typeof referenceListStates>>>
+export type ReferenceListStatesQueryError = ErrorType<unknown>
 
 
 /**
@@ -490,12 +491,12 @@ export type ListStatesApiV1ReferenceStatesGetQueryError = unknown
  *     The 50 states and the District of Columbia.
  * @summary List States
  */
-export function useListStatesApiV1ReferenceStatesGet<TData = Awaited<ReturnType<typeof listStatesApiV1ReferenceStatesGet>>, TError = unknown>(
-  options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listStatesApiV1ReferenceStatesGet>>, TError, TData>> & Pick<
+export function useReferenceListStates<TData = Awaited<ReturnType<typeof referenceListStates>>, TError = ErrorType<unknown>>(
+  options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof referenceListStates>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
-          Awaited<ReturnType<typeof listStatesApiV1ReferenceStatesGet>>,
+          Awaited<ReturnType<typeof referenceListStates>>,
           TError,
-          Awaited<ReturnType<typeof listStatesApiV1ReferenceStatesGet>>
+          Awaited<ReturnType<typeof referenceListStates>>
         > , 'initialData'
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
@@ -507,12 +508,12 @@ export function useListStatesApiV1ReferenceStatesGet<TData = Awaited<ReturnType<
  *     The 50 states and the District of Columbia.
  * @summary List States
  */
-export function useListStatesApiV1ReferenceStatesGet<TData = Awaited<ReturnType<typeof listStatesApiV1ReferenceStatesGet>>, TError = unknown>(
-  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listStatesApiV1ReferenceStatesGet>>, TError, TData>> & Pick<
+export function useReferenceListStates<TData = Awaited<ReturnType<typeof referenceListStates>>, TError = ErrorType<unknown>>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof referenceListStates>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
-          Awaited<ReturnType<typeof listStatesApiV1ReferenceStatesGet>>,
+          Awaited<ReturnType<typeof referenceListStates>>,
           TError,
-          Awaited<ReturnType<typeof listStatesApiV1ReferenceStatesGet>>
+          Awaited<ReturnType<typeof referenceListStates>>
         > , 'initialData'
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
@@ -524,8 +525,8 @@ export function useListStatesApiV1ReferenceStatesGet<TData = Awaited<ReturnType<
  *     The 50 states and the District of Columbia.
  * @summary List States
  */
-export function useListStatesApiV1ReferenceStatesGet<TData = Awaited<ReturnType<typeof listStatesApiV1ReferenceStatesGet>>, TError = unknown>(
-  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listStatesApiV1ReferenceStatesGet>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+export function useReferenceListStates<TData = Awaited<ReturnType<typeof referenceListStates>>, TError = ErrorType<unknown>>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof referenceListStates>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
@@ -535,12 +536,12 @@ export function useListStatesApiV1ReferenceStatesGet<TData = Awaited<ReturnType<
  *     The 50 states and the District of Columbia.
  * @summary List States
  */
-export function useListStatesApiV1ReferenceStatesGet<TData = Awaited<ReturnType<typeof listStatesApiV1ReferenceStatesGet>>, TError = unknown>(
-  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listStatesApiV1ReferenceStatesGet>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+export function useReferenceListStates<TData = Awaited<ReturnType<typeof referenceListStates>>, TError = ErrorType<unknown>>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof referenceListStates>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
-  const queryOptions = getListStatesApiV1ReferenceStatesGetQueryOptions(options)
+  const queryOptions = getReferenceListStatesQueryOptions(options)
 
   const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
 
@@ -553,19 +554,19 @@ export function useListStatesApiV1ReferenceStatesGet<TData = Awaited<ReturnType<
 
 
 
-export type listLayersApiV1ReferenceLayersGetResponse200 = {
+export type referenceListLayersResponse200 = {
   data: string[]
   status: 200
 }
 
-export type listLayersApiV1ReferenceLayersGetResponseSuccess = (listLayersApiV1ReferenceLayersGetResponse200) & {
+export type referenceListLayersResponseSuccess = (referenceListLayersResponse200) & {
   headers: Headers;
 };
 ;
 
-export type listLayersApiV1ReferenceLayersGetResponse = (listLayersApiV1ReferenceLayersGetResponseSuccess)
+export type referenceListLayersResponse = (referenceListLayersResponseSuccess)
 
-export const getListLayersApiV1ReferenceLayersGetUrl = () => {
+export const getReferenceListLayersUrl = () => {
 
 
 
@@ -580,9 +581,9 @@ export const getListLayersApiV1ReferenceLayersGetUrl = () => {
  *     Every table with ``state`` and ``geom`` columns, in name order.
  * @summary List Layers
  */
-export const listLayersApiV1ReferenceLayersGet = async ( options?: Parameters<typeof customFetch>[1]): Promise<listLayersApiV1ReferenceLayersGetResponse> => {
+export const referenceListLayers = async ( options?: Parameters<typeof customFetch>[1]): Promise<referenceListLayersResponse> => {
 
-  return customFetch<listLayersApiV1ReferenceLayersGetResponse>(getListLayersApiV1ReferenceLayersGetUrl(),
+  return customFetch<referenceListLayersResponse>(getReferenceListLayersUrl(),
   {
     ...options,
     method: 'GET'
@@ -595,33 +596,33 @@ export const listLayersApiV1ReferenceLayersGet = async ( options?: Parameters<ty
 
 
 
-export const getListLayersApiV1ReferenceLayersGetQueryKey = () => {
+export const getReferenceListLayersQueryKey = () => {
     return [
     `/api/v1/reference/layers`
     ] as const;
     }
 
 
-export const getListLayersApiV1ReferenceLayersGetQueryOptions = <TData = Awaited<ReturnType<typeof listLayersApiV1ReferenceLayersGet>>, TError = unknown>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listLayersApiV1ReferenceLayersGet>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+export const getReferenceListLayersQueryOptions = <TData = Awaited<ReturnType<typeof referenceListLayers>>, TError = ErrorType<unknown>>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof referenceListLayers>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
 ) => {
 
 const {query: queryOptions, request: requestOptions} = options ?? {};
 
-  const queryKey =  queryOptions?.queryKey ?? getListLayersApiV1ReferenceLayersGetQueryKey();
+  const queryKey =  queryOptions?.queryKey ?? getReferenceListLayersQueryKey();
 
 
 
-    const queryFn: QueryFunction<Awaited<ReturnType<typeof listLayersApiV1ReferenceLayersGet>>> = ({ signal }) => listLayersApiV1ReferenceLayersGet({ signal, ...requestOptions });
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof referenceListLayers>>> = ({ signal }) => referenceListLayers({ signal, ...requestOptions });
 
 
 
 
 
-   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listLayersApiV1ReferenceLayersGet>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof referenceListLayers>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
 }
 
-export type ListLayersApiV1ReferenceLayersGetQueryResult = NonNullable<Awaited<ReturnType<typeof listLayersApiV1ReferenceLayersGet>>>
-export type ListLayersApiV1ReferenceLayersGetQueryError = unknown
+export type ReferenceListLayersQueryResult = NonNullable<Awaited<ReturnType<typeof referenceListLayers>>>
+export type ReferenceListLayersQueryError = ErrorType<unknown>
 
 
 /**
@@ -631,12 +632,12 @@ export type ListLayersApiV1ReferenceLayersGetQueryError = unknown
  *     Every table with ``state`` and ``geom`` columns, in name order.
  * @summary List Layers
  */
-export function useListLayersApiV1ReferenceLayersGet<TData = Awaited<ReturnType<typeof listLayersApiV1ReferenceLayersGet>>, TError = unknown>(
-  options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listLayersApiV1ReferenceLayersGet>>, TError, TData>> & Pick<
+export function useReferenceListLayers<TData = Awaited<ReturnType<typeof referenceListLayers>>, TError = ErrorType<unknown>>(
+  options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof referenceListLayers>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
-          Awaited<ReturnType<typeof listLayersApiV1ReferenceLayersGet>>,
+          Awaited<ReturnType<typeof referenceListLayers>>,
           TError,
-          Awaited<ReturnType<typeof listLayersApiV1ReferenceLayersGet>>
+          Awaited<ReturnType<typeof referenceListLayers>>
         > , 'initialData'
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
@@ -648,12 +649,12 @@ export function useListLayersApiV1ReferenceLayersGet<TData = Awaited<ReturnType<
  *     Every table with ``state`` and ``geom`` columns, in name order.
  * @summary List Layers
  */
-export function useListLayersApiV1ReferenceLayersGet<TData = Awaited<ReturnType<typeof listLayersApiV1ReferenceLayersGet>>, TError = unknown>(
-  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listLayersApiV1ReferenceLayersGet>>, TError, TData>> & Pick<
+export function useReferenceListLayers<TData = Awaited<ReturnType<typeof referenceListLayers>>, TError = ErrorType<unknown>>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof referenceListLayers>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
-          Awaited<ReturnType<typeof listLayersApiV1ReferenceLayersGet>>,
+          Awaited<ReturnType<typeof referenceListLayers>>,
           TError,
-          Awaited<ReturnType<typeof listLayersApiV1ReferenceLayersGet>>
+          Awaited<ReturnType<typeof referenceListLayers>>
         > , 'initialData'
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
@@ -665,8 +666,8 @@ export function useListLayersApiV1ReferenceLayersGet<TData = Awaited<ReturnType<
  *     Every table with ``state`` and ``geom`` columns, in name order.
  * @summary List Layers
  */
-export function useListLayersApiV1ReferenceLayersGet<TData = Awaited<ReturnType<typeof listLayersApiV1ReferenceLayersGet>>, TError = unknown>(
-  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listLayersApiV1ReferenceLayersGet>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+export function useReferenceListLayers<TData = Awaited<ReturnType<typeof referenceListLayers>>, TError = ErrorType<unknown>>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof referenceListLayers>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
@@ -676,12 +677,12 @@ export function useListLayersApiV1ReferenceLayersGet<TData = Awaited<ReturnType<
  *     Every table with ``state`` and ``geom`` columns, in name order.
  * @summary List Layers
  */
-export function useListLayersApiV1ReferenceLayersGet<TData = Awaited<ReturnType<typeof listLayersApiV1ReferenceLayersGet>>, TError = unknown>(
-  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listLayersApiV1ReferenceLayersGet>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+export function useReferenceListLayers<TData = Awaited<ReturnType<typeof referenceListLayers>>, TError = ErrorType<unknown>>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof referenceListLayers>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
-  const queryOptions = getListLayersApiV1ReferenceLayersGetQueryOptions(options)
+  const queryOptions = getReferenceListLayersQueryOptions(options)
 
   const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
 
@@ -694,19 +695,19 @@ export function useListLayersApiV1ReferenceLayersGet<TData = Awaited<ReturnType<
 
 
 
-export type listLoadsApiV1ReferenceLoadsGetResponse200 = {
+export type referenceListLoadsResponse200 = {
   data: LoadRead[]
   status: 200
 }
 
-export type listLoadsApiV1ReferenceLoadsGetResponseSuccess = (listLoadsApiV1ReferenceLoadsGetResponse200) & {
+export type referenceListLoadsResponseSuccess = (referenceListLoadsResponse200) & {
   headers: Headers;
 };
 ;
 
-export type listLoadsApiV1ReferenceLoadsGetResponse = (listLoadsApiV1ReferenceLoadsGetResponseSuccess)
+export type referenceListLoadsResponse = (referenceListLoadsResponseSuccess)
 
-export const getListLoadsApiV1ReferenceLoadsGetUrl = () => {
+export const getReferenceListLoadsUrl = () => {
 
 
 
@@ -726,9 +727,9 @@ export const getListLoadsApiV1ReferenceLoadsGetUrl = () => {
  *     The newest ``public.load_runs`` row for each layer and state.
  * @summary List Loads
  */
-export const listLoadsApiV1ReferenceLoadsGet = async ( options?: Parameters<typeof customFetch>[1]): Promise<listLoadsApiV1ReferenceLoadsGetResponse> => {
+export const referenceListLoads = async ( options?: Parameters<typeof customFetch>[1]): Promise<referenceListLoadsResponse> => {
 
-  return customFetch<listLoadsApiV1ReferenceLoadsGetResponse>(getListLoadsApiV1ReferenceLoadsGetUrl(),
+  return customFetch<referenceListLoadsResponse>(getReferenceListLoadsUrl(),
   {
     ...options,
     method: 'GET'
@@ -741,33 +742,33 @@ export const listLoadsApiV1ReferenceLoadsGet = async ( options?: Parameters<type
 
 
 
-export const getListLoadsApiV1ReferenceLoadsGetQueryKey = () => {
+export const getReferenceListLoadsQueryKey = () => {
     return [
     `/api/v1/reference/loads`
     ] as const;
     }
 
 
-export const getListLoadsApiV1ReferenceLoadsGetQueryOptions = <TData = Awaited<ReturnType<typeof listLoadsApiV1ReferenceLoadsGet>>, TError = unknown>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listLoadsApiV1ReferenceLoadsGet>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+export const getReferenceListLoadsQueryOptions = <TData = Awaited<ReturnType<typeof referenceListLoads>>, TError = ErrorType<unknown>>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof referenceListLoads>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
 ) => {
 
 const {query: queryOptions, request: requestOptions} = options ?? {};
 
-  const queryKey =  queryOptions?.queryKey ?? getListLoadsApiV1ReferenceLoadsGetQueryKey();
+  const queryKey =  queryOptions?.queryKey ?? getReferenceListLoadsQueryKey();
 
 
 
-    const queryFn: QueryFunction<Awaited<ReturnType<typeof listLoadsApiV1ReferenceLoadsGet>>> = ({ signal }) => listLoadsApiV1ReferenceLoadsGet({ signal, ...requestOptions });
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof referenceListLoads>>> = ({ signal }) => referenceListLoads({ signal, ...requestOptions });
 
 
 
 
 
-   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listLoadsApiV1ReferenceLoadsGet>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof referenceListLoads>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
 }
 
-export type ListLoadsApiV1ReferenceLoadsGetQueryResult = NonNullable<Awaited<ReturnType<typeof listLoadsApiV1ReferenceLoadsGet>>>
-export type ListLoadsApiV1ReferenceLoadsGetQueryError = unknown
+export type ReferenceListLoadsQueryResult = NonNullable<Awaited<ReturnType<typeof referenceListLoads>>>
+export type ReferenceListLoadsQueryError = ErrorType<unknown>
 
 
 /**
@@ -782,12 +783,12 @@ export type ListLoadsApiV1ReferenceLoadsGetQueryError = unknown
  *     The newest ``public.load_runs`` row for each layer and state.
  * @summary List Loads
  */
-export function useListLoadsApiV1ReferenceLoadsGet<TData = Awaited<ReturnType<typeof listLoadsApiV1ReferenceLoadsGet>>, TError = unknown>(
-  options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listLoadsApiV1ReferenceLoadsGet>>, TError, TData>> & Pick<
+export function useReferenceListLoads<TData = Awaited<ReturnType<typeof referenceListLoads>>, TError = ErrorType<unknown>>(
+  options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof referenceListLoads>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
-          Awaited<ReturnType<typeof listLoadsApiV1ReferenceLoadsGet>>,
+          Awaited<ReturnType<typeof referenceListLoads>>,
           TError,
-          Awaited<ReturnType<typeof listLoadsApiV1ReferenceLoadsGet>>
+          Awaited<ReturnType<typeof referenceListLoads>>
         > , 'initialData'
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
@@ -804,12 +805,12 @@ export function useListLoadsApiV1ReferenceLoadsGet<TData = Awaited<ReturnType<ty
  *     The newest ``public.load_runs`` row for each layer and state.
  * @summary List Loads
  */
-export function useListLoadsApiV1ReferenceLoadsGet<TData = Awaited<ReturnType<typeof listLoadsApiV1ReferenceLoadsGet>>, TError = unknown>(
-  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listLoadsApiV1ReferenceLoadsGet>>, TError, TData>> & Pick<
+export function useReferenceListLoads<TData = Awaited<ReturnType<typeof referenceListLoads>>, TError = ErrorType<unknown>>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof referenceListLoads>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
-          Awaited<ReturnType<typeof listLoadsApiV1ReferenceLoadsGet>>,
+          Awaited<ReturnType<typeof referenceListLoads>>,
           TError,
-          Awaited<ReturnType<typeof listLoadsApiV1ReferenceLoadsGet>>
+          Awaited<ReturnType<typeof referenceListLoads>>
         > , 'initialData'
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
@@ -826,8 +827,8 @@ export function useListLoadsApiV1ReferenceLoadsGet<TData = Awaited<ReturnType<ty
  *     The newest ``public.load_runs`` row for each layer and state.
  * @summary List Loads
  */
-export function useListLoadsApiV1ReferenceLoadsGet<TData = Awaited<ReturnType<typeof listLoadsApiV1ReferenceLoadsGet>>, TError = unknown>(
-  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listLoadsApiV1ReferenceLoadsGet>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+export function useReferenceListLoads<TData = Awaited<ReturnType<typeof referenceListLoads>>, TError = ErrorType<unknown>>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof referenceListLoads>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
@@ -842,12 +843,12 @@ export function useListLoadsApiV1ReferenceLoadsGet<TData = Awaited<ReturnType<ty
  *     The newest ``public.load_runs`` row for each layer and state.
  * @summary List Loads
  */
-export function useListLoadsApiV1ReferenceLoadsGet<TData = Awaited<ReturnType<typeof listLoadsApiV1ReferenceLoadsGet>>, TError = unknown>(
-  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listLoadsApiV1ReferenceLoadsGet>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+export function useReferenceListLoads<TData = Awaited<ReturnType<typeof referenceListLoads>>, TError = ErrorType<unknown>>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof referenceListLoads>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
-  const queryOptions = getListLoadsApiV1ReferenceLoadsGetQueryOptions(options)
+  const queryOptions = getReferenceListLoadsQueryOptions(options)
 
   const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
 
@@ -860,26 +861,26 @@ export function useListLoadsApiV1ReferenceLoadsGet<TData = Awaited<ReturnType<ty
 
 
 
-export type startLoadsApiV1ReferenceLoadsPostResponse202 = {
+export type referenceStartLoadsResponse202 = {
   data: LoadsStarted
   status: 202
 }
 
-export type startLoadsApiV1ReferenceLoadsPostResponse422 = {
+export type referenceStartLoadsResponse422 = {
   data: HTTPValidationError
   status: 422
 }
 
-export type startLoadsApiV1ReferenceLoadsPostResponseSuccess = (startLoadsApiV1ReferenceLoadsPostResponse202) & {
+export type referenceStartLoadsResponseSuccess = (referenceStartLoadsResponse202) & {
   headers: Headers;
 };
-export type startLoadsApiV1ReferenceLoadsPostResponseError = (startLoadsApiV1ReferenceLoadsPostResponse422) & {
+export type referenceStartLoadsResponseError = (referenceStartLoadsResponse422) & {
   headers: Headers;
 };
 
-export type startLoadsApiV1ReferenceLoadsPostResponse = (startLoadsApiV1ReferenceLoadsPostResponseSuccess | startLoadsApiV1ReferenceLoadsPostResponseError)
+export type referenceStartLoadsResponse = (referenceStartLoadsResponseSuccess | referenceStartLoadsResponseError)
 
-export const getStartLoadsApiV1ReferenceLoadsPostUrl = () => {
+export const getReferenceStartLoadsUrl = () => {
 
 
 
@@ -907,9 +908,9 @@ export const getStartLoadsApiV1ReferenceLoadsPostUrl = () => {
  *         when any pair has a problem.
  * @summary Start Loads
  */
-export const startLoadsApiV1ReferenceLoadsPost = async (loadRequest: LoadRequest[], options?: Parameters<typeof customFetch>[1]): Promise<startLoadsApiV1ReferenceLoadsPostResponse> => {
+export const referenceStartLoads = async (loadRequest: LoadRequest[], options?: Parameters<typeof customFetch>[1]): Promise<referenceStartLoadsResponse> => {
 
-  return customFetch<startLoadsApiV1ReferenceLoadsPostResponse>(getStartLoadsApiV1ReferenceLoadsPostUrl(),
+  return customFetch<referenceStartLoadsResponse>(getReferenceStartLoadsUrl(),
   {
     ...options,
     method: 'POST',
@@ -922,13 +923,13 @@ export const startLoadsApiV1ReferenceLoadsPost = async (loadRequest: LoadRequest
 
 
 
-export const getStartLoadsApiV1ReferenceLoadsPostMutationKey = () => ['startLoadsApiV1ReferenceLoadsPost'] as const;
+export const getReferenceStartLoadsMutationKey = () => ['referenceStartLoads'] as const;
 
-export const getStartLoadsApiV1ReferenceLoadsPostMutationOptions = <TError = HTTPValidationError,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof startLoadsApiV1ReferenceLoadsPost>>, TError,StartLoadsApiV1ReferenceLoadsPostMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
-): UseMutationOptions<Awaited<ReturnType<typeof startLoadsApiV1ReferenceLoadsPost>>, TError,StartLoadsApiV1ReferenceLoadsPostMutationVariables, TContext> => {
+export const getReferenceStartLoadsMutationOptions = <TError = ErrorType<HTTPValidationError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof referenceStartLoads>>, TError,ReferenceStartLoadsMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof referenceStartLoads>>, TError,ReferenceStartLoadsMutationVariables, TContext> => {
 
-const mutationKey = getStartLoadsApiV1ReferenceLoadsPostMutationKey();
+const mutationKey = getReferenceStartLoadsMutationKey();
 const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
@@ -938,10 +939,10 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
 
 
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof startLoadsApiV1ReferenceLoadsPost>>, StartLoadsApiV1ReferenceLoadsPostMutationVariables> = (props) => {
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof referenceStartLoads>>, ReferenceStartLoadsMutationVariables> = (props) => {
           const {data} = props ?? {};
 
-          return  startLoadsApiV1ReferenceLoadsPost(data,requestOptions)
+          return  referenceStartLoads(data,requestOptions)
         }
 
 
@@ -951,10 +952,10 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
   return  { mutationFn, ...mutationOptions }}
 
-    export type StartLoadsApiV1ReferenceLoadsPostMutationResult = NonNullable<Awaited<ReturnType<typeof startLoadsApiV1ReferenceLoadsPost>>>
-    export type StartLoadsApiV1ReferenceLoadsPostMutationBody = LoadRequest[]
-    export type StartLoadsApiV1ReferenceLoadsPostMutationError = HTTPValidationError
-    export type StartLoadsApiV1ReferenceLoadsPostMutationVariables = {data: LoadRequest[]}
+    export type ReferenceStartLoadsMutationResult = NonNullable<Awaited<ReturnType<typeof referenceStartLoads>>>
+    export type ReferenceStartLoadsMutationBody = LoadRequest[]
+    export type ReferenceStartLoadsMutationError = ErrorType<HTTPValidationError>
+    export type ReferenceStartLoadsMutationVariables = {data: LoadRequest[]}
 
     /**
  * Load a list of layer and state pairs. Returns right away; loads run in the background.
@@ -976,30 +977,30 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
  *         when any pair has a problem.
  * @summary Start Loads
  */
-export const useStartLoadsApiV1ReferenceLoadsPost = <TError = HTTPValidationError,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof startLoadsApiV1ReferenceLoadsPost>>, TError,StartLoadsApiV1ReferenceLoadsPostMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+export const useReferenceStartLoads = <TError = ErrorType<HTTPValidationError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof referenceStartLoads>>, TError,ReferenceStartLoadsMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient): UseMutationResult<
-        Awaited<ReturnType<typeof startLoadsApiV1ReferenceLoadsPost>>,
+        Awaited<ReturnType<typeof referenceStartLoads>>,
         TError,
-        StartLoadsApiV1ReferenceLoadsPostMutationVariables,
+        ReferenceStartLoadsMutationVariables,
         TContext
       > => {
-      return useMutation(getStartLoadsApiV1ReferenceLoadsPostMutationOptions(options), queryClient);
+      return useMutation(getReferenceStartLoadsMutationOptions(options), queryClient);
     }
 
-export type listSourcesApiV1ReferenceSourcesGetResponse200 = {
+export type referenceListSourcesResponse200 = {
   data: SourceRead[]
   status: 200
 }
 
-export type listSourcesApiV1ReferenceSourcesGetResponseSuccess = (listSourcesApiV1ReferenceSourcesGetResponse200) & {
+export type referenceListSourcesResponseSuccess = (referenceListSourcesResponse200) & {
   headers: Headers;
 };
 ;
 
-export type listSourcesApiV1ReferenceSourcesGetResponse = (listSourcesApiV1ReferenceSourcesGetResponseSuccess)
+export type referenceListSourcesResponse = (referenceListSourcesResponseSuccess)
 
-export const getListSourcesApiV1ReferenceSourcesGetUrl = () => {
+export const getReferenceListSourcesUrl = () => {
 
 
 
@@ -1017,9 +1018,9 @@ export const getListSourcesApiV1ReferenceSourcesGetUrl = () => {
  *     All ``public.sources`` rows.
  * @summary List Sources
  */
-export const listSourcesApiV1ReferenceSourcesGet = async ( options?: Parameters<typeof customFetch>[1]): Promise<listSourcesApiV1ReferenceSourcesGetResponse> => {
+export const referenceListSources = async ( options?: Parameters<typeof customFetch>[1]): Promise<referenceListSourcesResponse> => {
 
-  return customFetch<listSourcesApiV1ReferenceSourcesGetResponse>(getListSourcesApiV1ReferenceSourcesGetUrl(),
+  return customFetch<referenceListSourcesResponse>(getReferenceListSourcesUrl(),
   {
     ...options,
     method: 'GET'
@@ -1032,33 +1033,33 @@ export const listSourcesApiV1ReferenceSourcesGet = async ( options?: Parameters<
 
 
 
-export const getListSourcesApiV1ReferenceSourcesGetQueryKey = () => {
+export const getReferenceListSourcesQueryKey = () => {
     return [
     `/api/v1/reference/sources`
     ] as const;
     }
 
 
-export const getListSourcesApiV1ReferenceSourcesGetQueryOptions = <TData = Awaited<ReturnType<typeof listSourcesApiV1ReferenceSourcesGet>>, TError = unknown>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listSourcesApiV1ReferenceSourcesGet>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+export const getReferenceListSourcesQueryOptions = <TData = Awaited<ReturnType<typeof referenceListSources>>, TError = ErrorType<unknown>>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof referenceListSources>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
 ) => {
 
 const {query: queryOptions, request: requestOptions} = options ?? {};
 
-  const queryKey =  queryOptions?.queryKey ?? getListSourcesApiV1ReferenceSourcesGetQueryKey();
+  const queryKey =  queryOptions?.queryKey ?? getReferenceListSourcesQueryKey();
 
 
 
-    const queryFn: QueryFunction<Awaited<ReturnType<typeof listSourcesApiV1ReferenceSourcesGet>>> = ({ signal }) => listSourcesApiV1ReferenceSourcesGet({ signal, ...requestOptions });
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof referenceListSources>>> = ({ signal }) => referenceListSources({ signal, ...requestOptions });
 
 
 
 
 
-   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listSourcesApiV1ReferenceSourcesGet>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof referenceListSources>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
 }
 
-export type ListSourcesApiV1ReferenceSourcesGetQueryResult = NonNullable<Awaited<ReturnType<typeof listSourcesApiV1ReferenceSourcesGet>>>
-export type ListSourcesApiV1ReferenceSourcesGetQueryError = unknown
+export type ReferenceListSourcesQueryResult = NonNullable<Awaited<ReturnType<typeof referenceListSources>>>
+export type ReferenceListSourcesQueryError = ErrorType<unknown>
 
 
 /**
@@ -1071,12 +1072,12 @@ export type ListSourcesApiV1ReferenceSourcesGetQueryError = unknown
  *     All ``public.sources`` rows.
  * @summary List Sources
  */
-export function useListSourcesApiV1ReferenceSourcesGet<TData = Awaited<ReturnType<typeof listSourcesApiV1ReferenceSourcesGet>>, TError = unknown>(
-  options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listSourcesApiV1ReferenceSourcesGet>>, TError, TData>> & Pick<
+export function useReferenceListSources<TData = Awaited<ReturnType<typeof referenceListSources>>, TError = ErrorType<unknown>>(
+  options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof referenceListSources>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
-          Awaited<ReturnType<typeof listSourcesApiV1ReferenceSourcesGet>>,
+          Awaited<ReturnType<typeof referenceListSources>>,
           TError,
-          Awaited<ReturnType<typeof listSourcesApiV1ReferenceSourcesGet>>
+          Awaited<ReturnType<typeof referenceListSources>>
         > , 'initialData'
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
@@ -1091,12 +1092,12 @@ export function useListSourcesApiV1ReferenceSourcesGet<TData = Awaited<ReturnTyp
  *     All ``public.sources`` rows.
  * @summary List Sources
  */
-export function useListSourcesApiV1ReferenceSourcesGet<TData = Awaited<ReturnType<typeof listSourcesApiV1ReferenceSourcesGet>>, TError = unknown>(
-  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listSourcesApiV1ReferenceSourcesGet>>, TError, TData>> & Pick<
+export function useReferenceListSources<TData = Awaited<ReturnType<typeof referenceListSources>>, TError = ErrorType<unknown>>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof referenceListSources>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
-          Awaited<ReturnType<typeof listSourcesApiV1ReferenceSourcesGet>>,
+          Awaited<ReturnType<typeof referenceListSources>>,
           TError,
-          Awaited<ReturnType<typeof listSourcesApiV1ReferenceSourcesGet>>
+          Awaited<ReturnType<typeof referenceListSources>>
         > , 'initialData'
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
@@ -1111,8 +1112,8 @@ export function useListSourcesApiV1ReferenceSourcesGet<TData = Awaited<ReturnTyp
  *     All ``public.sources`` rows.
  * @summary List Sources
  */
-export function useListSourcesApiV1ReferenceSourcesGet<TData = Awaited<ReturnType<typeof listSourcesApiV1ReferenceSourcesGet>>, TError = unknown>(
-  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listSourcesApiV1ReferenceSourcesGet>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+export function useReferenceListSources<TData = Awaited<ReturnType<typeof referenceListSources>>, TError = ErrorType<unknown>>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof referenceListSources>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
@@ -1125,12 +1126,12 @@ export function useListSourcesApiV1ReferenceSourcesGet<TData = Awaited<ReturnTyp
  *     All ``public.sources`` rows.
  * @summary List Sources
  */
-export function useListSourcesApiV1ReferenceSourcesGet<TData = Awaited<ReturnType<typeof listSourcesApiV1ReferenceSourcesGet>>, TError = unknown>(
-  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listSourcesApiV1ReferenceSourcesGet>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+export function useReferenceListSources<TData = Awaited<ReturnType<typeof referenceListSources>>, TError = ErrorType<unknown>>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof referenceListSources>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
-  const queryOptions = getListSourcesApiV1ReferenceSourcesGetQueryOptions(options)
+  const queryOptions = getReferenceListSourcesQueryOptions(options)
 
   const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
 
@@ -1143,26 +1144,26 @@ export function useListSourcesApiV1ReferenceSourcesGet<TData = Awaited<ReturnTyp
 
 
 
-export type createSourceApiV1ReferenceSourcesPostResponse201 = {
+export type referenceCreateSourceResponse201 = {
   data: SourceRead
   status: 201
 }
 
-export type createSourceApiV1ReferenceSourcesPostResponse422 = {
+export type referenceCreateSourceResponse422 = {
   data: HTTPValidationError
   status: 422
 }
 
-export type createSourceApiV1ReferenceSourcesPostResponseSuccess = (createSourceApiV1ReferenceSourcesPostResponse201) & {
+export type referenceCreateSourceResponseSuccess = (referenceCreateSourceResponse201) & {
   headers: Headers;
 };
-export type createSourceApiV1ReferenceSourcesPostResponseError = (createSourceApiV1ReferenceSourcesPostResponse422) & {
+export type referenceCreateSourceResponseError = (referenceCreateSourceResponse422) & {
   headers: Headers;
 };
 
-export type createSourceApiV1ReferenceSourcesPostResponse = (createSourceApiV1ReferenceSourcesPostResponseSuccess | createSourceApiV1ReferenceSourcesPostResponseError)
+export type referenceCreateSourceResponse = (referenceCreateSourceResponseSuccess | referenceCreateSourceResponseError)
 
-export const getCreateSourceApiV1ReferenceSourcesPostUrl = () => {
+export const getReferenceCreateSourceUrl = () => {
 
 
 
@@ -1185,9 +1186,9 @@ export const getCreateSourceApiV1ReferenceSourcesPostUrl = () => {
  *         has a source for that state, or already has a federal source.
  * @summary Create Source
  */
-export const createSourceApiV1ReferenceSourcesPost = async (sourceCreate: SourceCreate, options?: Parameters<typeof customFetch>[1]): Promise<createSourceApiV1ReferenceSourcesPostResponse> => {
+export const referenceCreateSource = async (sourceCreate: SourceCreate, options?: Parameters<typeof customFetch>[1]): Promise<referenceCreateSourceResponse> => {
 
-  return customFetch<createSourceApiV1ReferenceSourcesPostResponse>(getCreateSourceApiV1ReferenceSourcesPostUrl(),
+  return customFetch<referenceCreateSourceResponse>(getReferenceCreateSourceUrl(),
   {
     ...options,
     method: 'POST',
@@ -1200,13 +1201,13 @@ export const createSourceApiV1ReferenceSourcesPost = async (sourceCreate: Source
 
 
 
-export const getCreateSourceApiV1ReferenceSourcesPostMutationKey = () => ['createSourceApiV1ReferenceSourcesPost'] as const;
+export const getReferenceCreateSourceMutationKey = () => ['referenceCreateSource'] as const;
 
-export const getCreateSourceApiV1ReferenceSourcesPostMutationOptions = <TError = HTTPValidationError,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createSourceApiV1ReferenceSourcesPost>>, TError,CreateSourceApiV1ReferenceSourcesPostMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
-): UseMutationOptions<Awaited<ReturnType<typeof createSourceApiV1ReferenceSourcesPost>>, TError,CreateSourceApiV1ReferenceSourcesPostMutationVariables, TContext> => {
+export const getReferenceCreateSourceMutationOptions = <TError = ErrorType<HTTPValidationError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof referenceCreateSource>>, TError,ReferenceCreateSourceMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof referenceCreateSource>>, TError,ReferenceCreateSourceMutationVariables, TContext> => {
 
-const mutationKey = getCreateSourceApiV1ReferenceSourcesPostMutationKey();
+const mutationKey = getReferenceCreateSourceMutationKey();
 const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
@@ -1216,10 +1217,10 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
 
 
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createSourceApiV1ReferenceSourcesPost>>, CreateSourceApiV1ReferenceSourcesPostMutationVariables> = (props) => {
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof referenceCreateSource>>, ReferenceCreateSourceMutationVariables> = (props) => {
           const {data} = props ?? {};
 
-          return  createSourceApiV1ReferenceSourcesPost(data,requestOptions)
+          return  referenceCreateSource(data,requestOptions)
         }
 
 
@@ -1229,10 +1230,10 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
   return  { mutationFn, ...mutationOptions }}
 
-    export type CreateSourceApiV1ReferenceSourcesPostMutationResult = NonNullable<Awaited<ReturnType<typeof createSourceApiV1ReferenceSourcesPost>>>
-    export type CreateSourceApiV1ReferenceSourcesPostMutationBody = SourceCreate
-    export type CreateSourceApiV1ReferenceSourcesPostMutationError = HTTPValidationError
-    export type CreateSourceApiV1ReferenceSourcesPostMutationVariables = {data: SourceCreate}
+    export type ReferenceCreateSourceMutationResult = NonNullable<Awaited<ReturnType<typeof referenceCreateSource>>>
+    export type ReferenceCreateSourceMutationBody = SourceCreate
+    export type ReferenceCreateSourceMutationError = ErrorType<HTTPValidationError>
+    export type ReferenceCreateSourceMutationVariables = {data: SourceCreate}
 
     /**
  * Add a source.
@@ -1249,37 +1250,37 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
  *         has a source for that state, or already has a federal source.
  * @summary Create Source
  */
-export const useCreateSourceApiV1ReferenceSourcesPost = <TError = HTTPValidationError,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createSourceApiV1ReferenceSourcesPost>>, TError,CreateSourceApiV1ReferenceSourcesPostMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+export const useReferenceCreateSource = <TError = ErrorType<HTTPValidationError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof referenceCreateSource>>, TError,ReferenceCreateSourceMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient): UseMutationResult<
-        Awaited<ReturnType<typeof createSourceApiV1ReferenceSourcesPost>>,
+        Awaited<ReturnType<typeof referenceCreateSource>>,
         TError,
-        CreateSourceApiV1ReferenceSourcesPostMutationVariables,
+        ReferenceCreateSourceMutationVariables,
         TContext
       > => {
-      return useMutation(getCreateSourceApiV1ReferenceSourcesPostMutationOptions(options), queryClient);
+      return useMutation(getReferenceCreateSourceMutationOptions(options), queryClient);
     }
 
-export type updateSourceApiV1ReferenceSourcesSourceIdPatchResponse200 = {
+export type referenceUpdateSourceResponse200 = {
   data: SourceRead
   status: 200
 }
 
-export type updateSourceApiV1ReferenceSourcesSourceIdPatchResponse422 = {
+export type referenceUpdateSourceResponse422 = {
   data: HTTPValidationError
   status: 422
 }
 
-export type updateSourceApiV1ReferenceSourcesSourceIdPatchResponseSuccess = (updateSourceApiV1ReferenceSourcesSourceIdPatchResponse200) & {
+export type referenceUpdateSourceResponseSuccess = (referenceUpdateSourceResponse200) & {
   headers: Headers;
 };
-export type updateSourceApiV1ReferenceSourcesSourceIdPatchResponseError = (updateSourceApiV1ReferenceSourcesSourceIdPatchResponse422) & {
+export type referenceUpdateSourceResponseError = (referenceUpdateSourceResponse422) & {
   headers: Headers;
 };
 
-export type updateSourceApiV1ReferenceSourcesSourceIdPatchResponse = (updateSourceApiV1ReferenceSourcesSourceIdPatchResponseSuccess | updateSourceApiV1ReferenceSourcesSourceIdPatchResponseError)
+export type referenceUpdateSourceResponse = (referenceUpdateSourceResponseSuccess | referenceUpdateSourceResponseError)
 
-export const getUpdateSourceApiV1ReferenceSourcesSourceIdPatchUrl = (sourceId: number,) => {
+export const getReferenceUpdateSourceUrl = (sourceId: number,) => {
 
 
 
@@ -1302,10 +1303,10 @@ export const getUpdateSourceApiV1ReferenceSourcesSourceIdPatchUrl = (sourceId: n
  *     HTTPException: 404 when there is no source with that id.
  * @summary Update Source
  */
-export const updateSourceApiV1ReferenceSourcesSourceIdPatch = async (sourceId: number,
-    sourceUpdate: SourceUpdate, options?: Parameters<typeof customFetch>[1]): Promise<updateSourceApiV1ReferenceSourcesSourceIdPatchResponse> => {
+export const referenceUpdateSource = async (sourceId: number,
+    sourceUpdate: SourceUpdate, options?: Parameters<typeof customFetch>[1]): Promise<referenceUpdateSourceResponse> => {
 
-  return customFetch<updateSourceApiV1ReferenceSourcesSourceIdPatchResponse>(getUpdateSourceApiV1ReferenceSourcesSourceIdPatchUrl(sourceId),
+  return customFetch<referenceUpdateSourceResponse>(getReferenceUpdateSourceUrl(sourceId),
   {
     ...options,
     method: 'PATCH',
@@ -1318,13 +1319,13 @@ export const updateSourceApiV1ReferenceSourcesSourceIdPatch = async (sourceId: n
 
 
 
-export const getUpdateSourceApiV1ReferenceSourcesSourceIdPatchMutationKey = () => ['updateSourceApiV1ReferenceSourcesSourceIdPatch'] as const;
+export const getReferenceUpdateSourceMutationKey = () => ['referenceUpdateSource'] as const;
 
-export const getUpdateSourceApiV1ReferenceSourcesSourceIdPatchMutationOptions = <TError = HTTPValidationError,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateSourceApiV1ReferenceSourcesSourceIdPatch>>, TError,UpdateSourceApiV1ReferenceSourcesSourceIdPatchMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
-): UseMutationOptions<Awaited<ReturnType<typeof updateSourceApiV1ReferenceSourcesSourceIdPatch>>, TError,UpdateSourceApiV1ReferenceSourcesSourceIdPatchMutationVariables, TContext> => {
+export const getReferenceUpdateSourceMutationOptions = <TError = ErrorType<HTTPValidationError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof referenceUpdateSource>>, TError,ReferenceUpdateSourceMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof referenceUpdateSource>>, TError,ReferenceUpdateSourceMutationVariables, TContext> => {
 
-const mutationKey = getUpdateSourceApiV1ReferenceSourcesSourceIdPatchMutationKey();
+const mutationKey = getReferenceUpdateSourceMutationKey();
 const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
@@ -1334,10 +1335,10 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
 
 
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof updateSourceApiV1ReferenceSourcesSourceIdPatch>>, UpdateSourceApiV1ReferenceSourcesSourceIdPatchMutationVariables> = (props) => {
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof referenceUpdateSource>>, ReferenceUpdateSourceMutationVariables> = (props) => {
           const {sourceId,data} = props ?? {};
 
-          return  updateSourceApiV1ReferenceSourcesSourceIdPatch(sourceId,data,requestOptions)
+          return  referenceUpdateSource(sourceId,data,requestOptions)
         }
 
 
@@ -1347,10 +1348,10 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
   return  { mutationFn, ...mutationOptions }}
 
-    export type UpdateSourceApiV1ReferenceSourcesSourceIdPatchMutationResult = NonNullable<Awaited<ReturnType<typeof updateSourceApiV1ReferenceSourcesSourceIdPatch>>>
-    export type UpdateSourceApiV1ReferenceSourcesSourceIdPatchMutationBody = SourceUpdate
-    export type UpdateSourceApiV1ReferenceSourcesSourceIdPatchMutationError = HTTPValidationError
-    export type UpdateSourceApiV1ReferenceSourcesSourceIdPatchMutationVariables = {sourceId: number;data: SourceUpdate}
+    export type ReferenceUpdateSourceMutationResult = NonNullable<Awaited<ReturnType<typeof referenceUpdateSource>>>
+    export type ReferenceUpdateSourceMutationBody = SourceUpdate
+    export type ReferenceUpdateSourceMutationError = ErrorType<HTTPValidationError>
+    export type ReferenceUpdateSourceMutationVariables = {sourceId: number;data: SourceUpdate}
 
     /**
  * Change a source. Only the fields sent are changed.
@@ -1367,37 +1368,37 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
  *     HTTPException: 404 when there is no source with that id.
  * @summary Update Source
  */
-export const useUpdateSourceApiV1ReferenceSourcesSourceIdPatch = <TError = HTTPValidationError,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateSourceApiV1ReferenceSourcesSourceIdPatch>>, TError,UpdateSourceApiV1ReferenceSourcesSourceIdPatchMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+export const useReferenceUpdateSource = <TError = ErrorType<HTTPValidationError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof referenceUpdateSource>>, TError,ReferenceUpdateSourceMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient): UseMutationResult<
-        Awaited<ReturnType<typeof updateSourceApiV1ReferenceSourcesSourceIdPatch>>,
+        Awaited<ReturnType<typeof referenceUpdateSource>>,
         TError,
-        UpdateSourceApiV1ReferenceSourcesSourceIdPatchMutationVariables,
+        ReferenceUpdateSourceMutationVariables,
         TContext
       > => {
-      return useMutation(getUpdateSourceApiV1ReferenceSourcesSourceIdPatchMutationOptions(options), queryClient);
+      return useMutation(getReferenceUpdateSourceMutationOptions(options), queryClient);
     }
 
-export type checkSourceApiV1ReferenceSourcesCheckPostResponse200 = {
+export type referenceCheckSourceResponse200 = {
   data: CheckResult
   status: 200
 }
 
-export type checkSourceApiV1ReferenceSourcesCheckPostResponse422 = {
+export type referenceCheckSourceResponse422 = {
   data: HTTPValidationError
   status: 422
 }
 
-export type checkSourceApiV1ReferenceSourcesCheckPostResponseSuccess = (checkSourceApiV1ReferenceSourcesCheckPostResponse200) & {
+export type referenceCheckSourceResponseSuccess = (referenceCheckSourceResponse200) & {
   headers: Headers;
 };
-export type checkSourceApiV1ReferenceSourcesCheckPostResponseError = (checkSourceApiV1ReferenceSourcesCheckPostResponse422) & {
+export type referenceCheckSourceResponseError = (referenceCheckSourceResponse422) & {
   headers: Headers;
 };
 
-export type checkSourceApiV1ReferenceSourcesCheckPostResponse = (checkSourceApiV1ReferenceSourcesCheckPostResponseSuccess | checkSourceApiV1ReferenceSourcesCheckPostResponseError)
+export type referenceCheckSourceResponse = (referenceCheckSourceResponseSuccess | referenceCheckSourceResponseError)
 
-export const getCheckSourceApiV1ReferenceSourcesCheckPostUrl = () => {
+export const getReferenceCheckSourceUrl = () => {
 
 
 
@@ -1423,9 +1424,9 @@ export const getCheckSourceApiV1ReferenceSourcesCheckPostUrl = () => {
  *         opened.
  * @summary Check Source
  */
-export const checkSourceApiV1ReferenceSourcesCheckPost = async (checkRequest: CheckRequest, options?: Parameters<typeof customFetch>[1]): Promise<checkSourceApiV1ReferenceSourcesCheckPostResponse> => {
+export const referenceCheckSource = async (checkRequest: CheckRequest, options?: Parameters<typeof customFetch>[1]): Promise<referenceCheckSourceResponse> => {
 
-  return customFetch<checkSourceApiV1ReferenceSourcesCheckPostResponse>(getCheckSourceApiV1ReferenceSourcesCheckPostUrl(),
+  return customFetch<referenceCheckSourceResponse>(getReferenceCheckSourceUrl(),
   {
     ...options,
     method: 'POST',
@@ -1438,13 +1439,13 @@ export const checkSourceApiV1ReferenceSourcesCheckPost = async (checkRequest: Ch
 
 
 
-export const getCheckSourceApiV1ReferenceSourcesCheckPostMutationKey = () => ['checkSourceApiV1ReferenceSourcesCheckPost'] as const;
+export const getReferenceCheckSourceMutationKey = () => ['referenceCheckSource'] as const;
 
-export const getCheckSourceApiV1ReferenceSourcesCheckPostMutationOptions = <TError = HTTPValidationError,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof checkSourceApiV1ReferenceSourcesCheckPost>>, TError,CheckSourceApiV1ReferenceSourcesCheckPostMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
-): UseMutationOptions<Awaited<ReturnType<typeof checkSourceApiV1ReferenceSourcesCheckPost>>, TError,CheckSourceApiV1ReferenceSourcesCheckPostMutationVariables, TContext> => {
+export const getReferenceCheckSourceMutationOptions = <TError = ErrorType<HTTPValidationError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof referenceCheckSource>>, TError,ReferenceCheckSourceMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof referenceCheckSource>>, TError,ReferenceCheckSourceMutationVariables, TContext> => {
 
-const mutationKey = getCheckSourceApiV1ReferenceSourcesCheckPostMutationKey();
+const mutationKey = getReferenceCheckSourceMutationKey();
 const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
@@ -1454,10 +1455,10 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
 
 
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof checkSourceApiV1ReferenceSourcesCheckPost>>, CheckSourceApiV1ReferenceSourcesCheckPostMutationVariables> = (props) => {
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof referenceCheckSource>>, ReferenceCheckSourceMutationVariables> = (props) => {
           const {data} = props ?? {};
 
-          return  checkSourceApiV1ReferenceSourcesCheckPost(data,requestOptions)
+          return  referenceCheckSource(data,requestOptions)
         }
 
 
@@ -1467,10 +1468,10 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
   return  { mutationFn, ...mutationOptions }}
 
-    export type CheckSourceApiV1ReferenceSourcesCheckPostMutationResult = NonNullable<Awaited<ReturnType<typeof checkSourceApiV1ReferenceSourcesCheckPost>>>
-    export type CheckSourceApiV1ReferenceSourcesCheckPostMutationBody = CheckRequest
-    export type CheckSourceApiV1ReferenceSourcesCheckPostMutationError = HTTPValidationError
-    export type CheckSourceApiV1ReferenceSourcesCheckPostMutationVariables = {data: CheckRequest}
+    export type ReferenceCheckSourceMutationResult = NonNullable<Awaited<ReturnType<typeof referenceCheckSource>>>
+    export type ReferenceCheckSourceMutationBody = CheckRequest
+    export type ReferenceCheckSourceMutationError = ErrorType<HTTPValidationError>
+    export type ReferenceCheckSourceMutationVariables = {data: CheckRequest}
 
     /**
  * Open a link and match its fields to the layer's columns, without saving anything.
@@ -1490,13 +1491,13 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
  *         opened.
  * @summary Check Source
  */
-export const useCheckSourceApiV1ReferenceSourcesCheckPost = <TError = HTTPValidationError,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof checkSourceApiV1ReferenceSourcesCheckPost>>, TError,CheckSourceApiV1ReferenceSourcesCheckPostMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+export const useReferenceCheckSource = <TError = ErrorType<HTTPValidationError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof referenceCheckSource>>, TError,ReferenceCheckSourceMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient): UseMutationResult<
-        Awaited<ReturnType<typeof checkSourceApiV1ReferenceSourcesCheckPost>>,
+        Awaited<ReturnType<typeof referenceCheckSource>>,
         TError,
-        CheckSourceApiV1ReferenceSourcesCheckPostMutationVariables,
+        ReferenceCheckSourceMutationVariables,
         TContext
       > => {
-      return useMutation(getCheckSourceApiV1ReferenceSourcesCheckPostMutationOptions(options), queryClient);
+      return useMutation(getReferenceCheckSourceMutationOptions(options), queryClient);
     }
