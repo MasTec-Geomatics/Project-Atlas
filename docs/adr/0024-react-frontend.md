@@ -1,6 +1,7 @@
 # 0024. React for the Frontend
 
-**Status:** Accepted **Date:** 2026-11-19 **Updated:** 2026-11-20 (API client changed to Orval)
+**Status:** Accepted **Date:** 2026-11-19 **Updated:** 2026-11-20 (API client changed to Orval; API
+errors, operation IDs, and tests)
 **Supersedes:** [0003](0003-vue-frontend.md)
 
 ## Context
@@ -84,10 +85,42 @@ generated, not written by hand.
 - Requests use the browser's `fetch`, not axios, and go to `/api/v1/...` on the same origin (ADR
   0013).
 
+### API Errors
+
+- Every generated call goes through `customFetch` in `web/src/api/fetcher.ts`, set as Orval's
+  mutator.
+- Every failed call throws `ApiError`, with the request's method, URL, HTTP status, and response
+  body. The message names the request, for example
+  `PATCH /api/v1/reference/sources/1 failed with status 422`.
+- A request that gets no response, because the API is down or the network failed, throws `ApiError`
+  with status `0` and the original error as `cause`.
+- Error bodies that are not JSON, such as a proxy's error page, are kept as text.
+- A cancelled request rethrows its abort error unchanged, so TanStack Query treats it as a cancel.
+- Generated hooks type their errors as `ApiError`.
+
+### Operation IDs
+
+- Orval names functions and hooks from the API's operation IDs.
+- The API builds each operation ID as `<tag>-<function name>`, for example `reference-list_states`,
+  which becomes `useReferenceListStates`.
+- Every API route in the schema needs a tag. A route without one stops the API from starting, with
+  an error naming the route's method and path.
+
 ### Forms
 
 - TanStack Form holds form state. Zod schemas validate fields directly.
 - Zod validation in forms improves the user experience. The API remains the authoritative validator.
+
+### Tests
+
+- Tests run with `vp test`, using the Vitest bundled with Vite+. Test code imports from
+  `vite-plus/test`.
+- Test configuration is the `test` block in `web/vite.config.ts`, with the `jsdom` environment.
+- `web/src/test/setup.ts` loads jest-dom and mocks the browser APIs jsdom lacks and Mantine needs,
+  following Mantine's Vitest guide.
+- Components are rendered with `render` from `web/src/test/render.tsx`, which wraps them in
+  `MantineProvider`.
+- Each test file sits next to the file it tests, as `*.test.ts` or `*.test.tsx`.
 
 ## Tentative
 
