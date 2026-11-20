@@ -10,6 +10,7 @@
     "lint:fix": "vp lint --fix",
     "fmt": "vp fmt --check",
     "fmt:fix": "vp fmt",
+    "pre-commit": "vp lint --fix && vp fmt",
     "preview": "vp preview"
   },
   "dependencies": {
