@@ -1,5 +1,5 @@
 import "@mantine/core/styles.css";
-import "./index.css";
+import "@/styles/global.css";
 
 import { MantineProvider } from "@mantine/core";
 import { StrictMode } from "react";
