@@ -5,7 +5,7 @@
 
 ## Context
 
-The Vue app and the API run as separate services. A browser blocks cross-origin requests unless the API allows them through CORS.
+The React app and the API run as separate services. A browser blocks cross-origin requests unless the API allows them through CORS.
 
 ## Decision
 

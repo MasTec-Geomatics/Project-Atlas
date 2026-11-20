@@ -2,6 +2,7 @@
 
 **Status:** Accepted
 **Date:** 2026-11-09
+**Revised:** 2026-11-19
 
 ## Context
 
@@ -30,7 +31,7 @@ Build authentication so the provider can be replaced without changing the rest o
 
 ### Frontend
 
-- `@clerk/vue` is only imported in `web/src/composables/useAuth.ts`.
+- `@clerk/react` is only imported in `web/src/hooks/useAuth.ts`.
 - The rest of the app uses `useAuth` for the current user, token, sign-in, and sign-out.
 
 ## Consequences

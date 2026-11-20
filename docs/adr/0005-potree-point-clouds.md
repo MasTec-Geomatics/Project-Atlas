@@ -16,4 +16,4 @@ Use Potree to display point clouds in the web app.
 
 - LiDAR files need a viewing copy prepared for Potree. The original files stay untouched.
 - The viewing format is not yet decided.
-- Potree is wrapped in a Vue component.
+- Potree is wrapped in a React component.
