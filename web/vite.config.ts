@@ -28,6 +28,9 @@ export default defineConfig({
     ],
   },
   plugins: lazyPlugins(() => [react()]),
+  resolve: {
+    tsconfigPaths: true,
+  },
   server: {
     proxy: {
       "/api": "http://localhost:8000",
