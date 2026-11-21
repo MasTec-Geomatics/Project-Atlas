@@ -1,7 +1,7 @@
 import "@testing-library/jest-dom/vitest";
 
-import {cleanup} from "@testing-library/react";
-import {afterEach, vi} from "vite-plus/test";
+import { cleanup } from "@testing-library/react";
+import { afterEach, vi } from "vite-plus/test";
 
 // jsdom lacks these browser APIs, and Mantine components call them.
 // This follows Mantine's "Testing with Vitest" guide.

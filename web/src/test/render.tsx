@@ -1,6 +1,6 @@
-import {MantineProvider} from "@mantine/core";
-import {render as testingLibraryRender} from "@testing-library/react";
-import type {ReactNode} from "react";
+import { MantineProvider } from "@mantine/core";
+import { render as testingLibraryRender } from "@testing-library/react";
+import type { ReactNode } from "react";
 
 /**
  * Render a component inside MantineProvider, which every Mantine component needs.
