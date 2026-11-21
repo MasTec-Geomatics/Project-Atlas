@@ -1,6 +1,6 @@
-import {afterEach, describe, expect, it, vi} from "vite-plus/test";
+import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
-import {ApiError, customFetch} from "@/api/fetcher";
+import { ApiError, customFetch } from "@/api/fetcher";
 
 function stubFetch(implementation: () => Promise<Response>) {
   vi.stubGlobal("fetch", vi.fn(implementation));
