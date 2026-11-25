@@ -90,6 +90,20 @@ export interface HTTPValidationError {
 }
 
 /**
+ * A layer, with the names the admin page shows.
+ *
+ * Attributes:
+ *     name: Table name, such as ``hydro.wetlands``. The page sends this to load it.
+ *     title: Readable name, such as ``Wetlands``.
+ *     group: Readable name of the layer's schema, such as ``Water``.
+ */
+export interface LayerRead {
+  name: string;
+  title: string;
+  group: string;
+}
+
+/**
  * The last load of one layer and state.
  *
  * Attributes:
@@ -555,7 +569,7 @@ export function useReferenceListStates<TData = Awaited<ReturnType<typeof referen
 
 
 export type referenceListLayersResponse200 = {
-  data: string[]
+  data: LayerRead[]
   status: 200
 }
 
@@ -575,7 +589,9 @@ export const getReferenceListLayersUrl = () => {
 }
 
 /**
- * List every layer by name, such as ``boundaries.places``.
+ * List every layer with its readable name and group.
+ *
+ * The readable names come from each model's ``info``.
  *
  * Returns:
  *     Every table with ``state`` and ``geom`` columns, in name order.
@@ -626,7 +642,9 @@ export type ReferenceListLayersQueryError = ErrorType<unknown>
 
 
 /**
- * List every layer by name, such as ``boundaries.places``.
+ * List every layer with its readable name and group.
+ *
+ * The readable names come from each model's ``info``.
  *
  * Returns:
  *     Every table with ``state`` and ``geom`` columns, in name order.
@@ -643,7 +661,9 @@ export function useReferenceListLayers<TData = Awaited<ReturnType<typeof referen
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
- * List every layer by name, such as ``boundaries.places``.
+ * List every layer with its readable name and group.
+ *
+ * The readable names come from each model's ``info``.
  *
  * Returns:
  *     Every table with ``state`` and ``geom`` columns, in name order.
@@ -660,7 +680,9 @@ export function useReferenceListLayers<TData = Awaited<ReturnType<typeof referen
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
- * List every layer by name, such as ``boundaries.places``.
+ * List every layer with its readable name and group.
+ *
+ * The readable names come from each model's ``info``.
  *
  * Returns:
  *     Every table with ``state`` and ``geom`` columns, in name order.
@@ -671,7 +693,9 @@ export function useReferenceListLayers<TData = Awaited<ReturnType<typeof referen
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
- * List every layer by name, such as ``boundaries.places``.
+ * List every layer with its readable name and group.
+ *
+ * The readable names come from each model's ``info``.
  *
  * Returns:
  *     Every table with ``state`` and ``geom`` columns, in name order.

@@ -43,6 +43,10 @@ api-check:
     cd api && uv run ruff format --check .
     cd api && uv run mypy
 
+# Run mypy in api
+api-mypy:
+    cd api && uv run mypy
+
 # Fix lint issues and format code in api
 api-fix:
     cd api && uv run ruff check --fix .
@@ -51,3 +55,22 @@ api-fix:
 # Run the WEB server (Dev)
 web-dev:
     cd web && bun run dev
+
+# Generate types for web
+orval:
+    cd web && bun run api:generate
+
+# Web lint
+web-lint:
+    cd web && bun run lint:fix && bun run lint:css
+
+# Web formate
+web-fmt:
+    cd web && bun run fmt:fix
+
+# Web test
+web-test:
+    cd web && bun run test
+
+# pre-commit
+pre-commit: api-mypy api-fix orval web-lint web-fmt api-test web-test
