@@ -88,7 +88,7 @@ function loadRequestCount(fetchStub: ReturnType<typeof stubApi>, method: string)
 
 async function addState(name: string) {
   const user = userEvent.setup();
-  await user.type(screen.getByRole("textbox", { name: "Add a state" }), name);
+  await user.type(await screen.findByRole("combobox", { name: "Add a state" }), name);
   await user.click(await screen.findByRole("option", { name: new RegExp(name, "i") }));
 }
 

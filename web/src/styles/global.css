@@ -1,8 +1,75 @@
 /*
- * Reset rules that Mantine's baseline (@mantine/core/styles.css) doesn't include.
- * Mantine already sets box-sizing, body margin, body font and colors, and font: inherit
- * on form controls.
+ * Global styles for Atlas.
+ *
+ * :root holds the Project Atlas design system's values (from the MasTec CE&I brand
+ * guidelines) as CSS variables, so every CSS Module can use them with var(). The rest
+ * is the CSS reset rules Mantine's baseline (@mantine/core/styles.css) doesn't include,
+ * and the brand's page defaults.
  */
+
+:root {
+  /* Brand primary */
+  --color-mastec-blue: #0057b8;
+
+  /* Brand secondary */
+  --color-dark-navy: #072037;
+  --color-med-dk-gray: #58595b;
+
+  /* Brand neutrals */
+  --color-black: #000;
+  --color-med-gray: #a7a9ac;
+  --color-med-lt-gray: #d1d3d4;
+  --color-lt-gray: #eaeaea;
+  --color-white: #fff;
+
+  /* Brand tertiary */
+  --color-turquoise: #00d6d6;
+  --color-teal: #005252;
+  --color-citron: #d0df00;
+  --color-dk-green: #2f6416;
+  --color-orange: #ff5b24;
+  --color-rust: #b2491b;
+  --color-cream: #f5efe6;
+
+  /* Font families */
+  --font-ui: arial, "Helvetica Neue", helvetica, sans-serif;
+  --font-figtree: "Figtree", arial, sans-serif;
+  --font-mono: consolas, "Courier New", monospace;
+
+  /* Type sizes and line heights */
+  --font-size-display: 32px;
+  --line-height-display: 40px;
+  --font-size-h1: 24px;
+  --line-height-h1: 32px;
+  --font-size-h2: 18px;
+  --line-height-h2: 24px;
+  --font-size-subhead: 15px;
+  --line-height-subhead: 20px;
+  --font-size-body: 14px;
+  --line-height-body: 20px;
+  --font-size-body-sm: 12px;
+  --line-height-body-sm: 16px;
+  --font-size-label: 12px;
+  --line-height-label: 16px;
+  --font-size-data: 13px;
+  --line-height-data: 18px;
+
+  /* Spacing (4px grid) */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-6: 24px;
+  --space-8: 32px;
+
+  /* Corner radius */
+  --radius-none: 0;
+  --radius-sm: 2px;
+  --radius-md: 4px;
+
+  /* Shadow, only for panels floating over the map */
+  --shadow-panel: 0 1px 3px rgb(7 32 55 / 18%);
+}
 
 /* Remove default margins; spacing comes from each component's own CSS. */
 * {
@@ -12,6 +79,16 @@
 /* Keep text from resizing when a phone turns sideways. */
 html {
   text-size-adjust: none;
+}
+
+/* Brand page defaults: Arial for internal tools, dark-navy text on lt-gray, left aligned. */
+body {
+  font-family: var(--font-ui);
+  font-size: var(--font-size-body);
+  line-height: var(--line-height-body);
+  color: var(--color-dark-navy);
+  background-color: var(--color-lt-gray);
+  text-align: left;
 }
 
 /* Media fills its container's width at most and sits on its own line. */
@@ -48,6 +125,17 @@ h4,
 h5,
 h6 {
   text-wrap: balance;
+}
+
+/* Links use the brand primary. */
+a {
+  color: var(--color-mastec-blue);
+}
+
+/* Focus ring in the brand primary, shown for keyboard focus only. */
+:focus-visible {
+  outline: 2px solid var(--color-mastec-blue);
+  outline-offset: 2px;
 }
 
 /* Keep the app's z-index stacking separate from anything outside #root. */
