@@ -1,5 +1,6 @@
 import {
   Alert,
+  Anchor,
   Button,
   Checkbox,
   Group,
@@ -12,6 +13,7 @@ import {
   Title,
 } from "@mantine/core";
 import { useQueryClient } from "@tanstack/react-query";
+import { Link } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 
 import { ApiError } from "@/api/fetcher";
@@ -376,9 +378,14 @@ export function ReferenceAdminPage() {
 
       <main className={classes.content}>
         <section className={classes.section}>
-          <Title order={2} className={classes.accent}>
-            Load
-          </Title>
+          <Group justify="space-between" align="start">
+            <Title order={2} className={classes.accent}>
+              Load
+            </Title>
+            <Anchor component={Link} to="/admin/reference/sources">
+              Sources
+            </Anchor>
+          </Group>
 
           <Group align="end">
             <MultiSelect

@@ -10,43 +10,53 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
-import { Route as AdminReferenceRouteImport } from './routes/admin/reference'
+import { Route as AdminReferenceIndexRouteImport } from './routes/admin/reference/index'
+import { Route as AdminReferenceSourcesRouteImport } from './routes/admin/reference/sources'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
-const AdminReferenceRoute = AdminReferenceRouteImport.update({
-  id: '/admin/reference',
-  path: '/admin/reference',
+const AdminReferenceIndexRoute = AdminReferenceIndexRouteImport.update({
+  id: '/admin/reference/',
+  path: '/admin/reference/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AdminReferenceSourcesRoute = AdminReferenceSourcesRouteImport.update({
+  id: '/admin/reference/sources',
+  path: '/admin/reference/sources',
   getParentRoute: () => rootRouteImport,
 } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
-  '/admin/reference': typeof AdminReferenceRoute
+  '/admin/reference/sources': typeof AdminReferenceSourcesRoute
+  '/admin/reference/': typeof AdminReferenceIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
-  '/admin/reference': typeof AdminReferenceRoute
+  '/admin/reference/sources': typeof AdminReferenceSourcesRoute
+  '/admin/reference': typeof AdminReferenceIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
-  '/admin/reference': typeof AdminReferenceRoute
+  '/admin/reference/sources': typeof AdminReferenceSourcesRoute
+  '/admin/reference/': typeof AdminReferenceIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/admin/reference'
+  fullPaths: '/' | '/admin/reference/sources' | '/admin/reference/'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/admin/reference'
-  id: '__root__' | '/' | '/admin/reference'
+  to: '/' | '/admin/reference/sources' | '/admin/reference'
+  id: '__root__' | '/' | '/admin/reference/sources' | '/admin/reference/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
-  AdminReferenceRoute: typeof AdminReferenceRoute
+  AdminReferenceSourcesRoute: typeof AdminReferenceSourcesRoute
+  AdminReferenceIndexRoute: typeof AdminReferenceIndexRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -58,11 +68,18 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/admin/reference': {
-      id: '/admin/reference'
+    '/admin/reference/': {
+      id: '/admin/reference/'
       path: '/admin/reference'
-      fullPath: '/admin/reference'
-      preLoaderRoute: typeof AdminReferenceRouteImport
+      fullPath: '/admin/reference/'
+      preLoaderRoute: typeof AdminReferenceIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/admin/reference/sources': {
+      id: '/admin/reference/sources'
+      path: '/admin/reference/sources'
+      fullPath: '/admin/reference/sources'
+      preLoaderRoute: typeof AdminReferenceSourcesRouteImport
       parentRoute: typeof rootRouteImport
     }
   }
@@ -70,7 +87,8 @@ declare module '@tanstack/react-router' {
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
-  AdminReferenceRoute: AdminReferenceRoute,
+  AdminReferenceSourcesRoute: AdminReferenceSourcesRoute,
+  AdminReferenceIndexRoute: AdminReferenceIndexRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

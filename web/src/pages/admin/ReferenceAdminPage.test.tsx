@@ -144,6 +144,19 @@ describe("/admin/reference load table", () => {
     expect(screen.queryByRole("table")).not.toBeInTheDocument();
   });
 
+  it("links to the sources page", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => Response.json([])),
+    );
+    const user = userEvent.setup();
+    renderRoute(PAGE_URL);
+
+    await user.click(await screen.findByRole("link", { name: "Sources" }));
+
+    expect(await screen.findByRole("button", { name: "Add source" })).toBeInTheDocument();
+  });
+
   it("shows one table per group, under its readable name", async () => {
     stubApi();
     renderRoute(PAGE_URL);
