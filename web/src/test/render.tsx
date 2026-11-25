@@ -5,6 +5,7 @@ import { render as testingLibraryRender } from "@testing-library/react";
 import type { ReactNode } from "react";
 
 import { routeTree } from "@/routeTree.gen";
+import { cssVariablesResolver, theme } from "@/theme";
 
 /**
  * Render a component inside MantineProvider, which every Mantine component needs.
@@ -12,7 +13,9 @@ import { routeTree } from "@/routeTree.gen";
 export function render(ui: ReactNode) {
   return testingLibraryRender(ui, {
     wrapper: ({ children }: { children: ReactNode }) => (
-      <MantineProvider env="test">{children}</MantineProvider>
+      <MantineProvider theme={theme} cssVariablesResolver={cssVariablesResolver} env="test">
+        {children}
+      </MantineProvider>
     ),
   });
 }
@@ -28,7 +31,7 @@ export function render(ui: ReactNode) {
  * Retries are off so a failed request shows its error right away.
  *
  * Args:
- *  path: The URL to open, such as `/admin/reference`.
+ *   path: The URL to open, such as `/admin/reference`.
  */
 export function renderRoute(path: string) {
   const queryClient = new QueryClient({
@@ -44,7 +47,7 @@ export function renderRoute(path: string) {
 
   return testingLibraryRender(
     <QueryClientProvider client={queryClient}>
-      <MantineProvider env="test">
+      <MantineProvider theme={theme} cssVariablesResolver={cssVariablesResolver} env="test">
         <RouterProvider router={router} />
       </MantineProvider>
     </QueryClientProvider>,
