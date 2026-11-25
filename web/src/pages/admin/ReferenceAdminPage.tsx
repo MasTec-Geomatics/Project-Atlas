@@ -24,9 +24,7 @@ import {
   useReferenceStartLoads,
 } from "@/api/generated";
 
-/**
- * How often the page asks for load status while a load is running.
- */
+/** How often the page asks for load status while a load is running. */
 const LOAD_STATUS_INTERVAL_MS = 3000;
 
 /**
@@ -34,6 +32,24 @@ const LOAD_STATUS_INTERVAL_MS = 3000;
  */
 function boxKey(layer: string, state: string): string {
   return `${layer}|${state}`;
+}
+
+/**
+ * Group layer names by schema, the part before the dot.
+ *
+ * Args:
+ *   layers: Layer names such as `hydro.wetlands`, in name order.
+ *
+ * Returns:
+ *   Each schema with its layers, in the order the schemas first appear.
+ */
+function groupBySchema(layers: string[]): [string, string[]][] {
+  const groups = new Map<string, string[]>();
+  for (const layer of layers) {
+    const schema = layer.split(".")[0];
+    groups.set(schema, [...(groups.get(schema) ?? []), layer]);
+  }
+  return [...groups];
 }
 
 /**
@@ -73,7 +89,7 @@ function LoadStatus({ load, label }: LoadStatusProps) {
   if (load.status === "succeeded") {
     return (
       <Stack gap={0}>
-        <Text size="sm" c="green">
+        <Text size="sm" c="var(--color-dk-green)">
           succeeded
         </Text>
         {load.rows_loaded !== null && (
@@ -85,7 +101,7 @@ function LoadStatus({ load, label }: LoadStatusProps) {
 
   return (
     <Stack gap={0}>
-      <Text size="sm" c="red">
+      <Text size="sm" c="var(--color-rust)">
         failed
       </Text>
       {load.error !== null && <Text size="xs">{load.error}</Text>}
@@ -96,8 +112,9 @@ function LoadStatus({ load, label }: LoadStatusProps) {
 /**
  * Admin page for the reference database.
  *
- * The load table has one row per state and one column per layer. Each box can be
- * checked, and one Load button sends every checked box as one load request.
+ * The Load section has one table per schema, each with one row per state and one
+ * column per layer. Each box can be checked, and one Load button sends every checked
+ * box, from every table, as one load request.
  */
 export function ReferenceAdminPage() {
   const queryClient = useQueryClient();
@@ -179,39 +196,51 @@ export function ReferenceAdminPage() {
         onSearchChange={setStateSearch}
       />
 
-      <Table withTableBorder withColumnBorders>
-        <Table.Thead>
-          <Table.Tr>
-            <Table.Th>State</Table.Th>
-            {allLayers.map((layer) => (
-              <Table.Th key={layer}>{layer}</Table.Th>
-            ))}
-          </Table.Tr>
-        </Table.Thead>
-        <Table.Tbody>
-          {rows.map((state) => (
-            <Table.Tr key={state}>
-              <Table.Th scope="row">{state}</Table.Th>
-              {allLayers.map((layer) => {
-                const key = boxKey(layer, state);
-                const label = `Load ${layer} for ${state}`;
-                return (
-                  <Table.Td key={key}>
-                    <Stack gap="xs">
-                      <Checkbox
-                        aria-label={label}
-                        checked={selected.has(key)}
-                        onChange={() => toggle(key)}
-                      />
-                      <LoadStatus load={loadsByBox.get(key)} label={label} />
-                    </Stack>
-                  </Table.Td>
-                );
-              })}
-            </Table.Tr>
-          ))}
-        </Table.Tbody>
-      </Table>
+      {groupBySchema(allLayers).map(([schema, schemaLayers]) => (
+        <Stack key={schema} gap="xs">
+          <Title order={3} id={`schema-${schema}`}>
+            {schema}
+          </Title>
+          <Table
+            withTableBorder
+            withColumnBorders
+            bg="var(--color-white)"
+            aria-labelledby={`schema-${schema}`}
+          >
+            <Table.Thead>
+              <Table.Tr>
+                <Table.Th>State</Table.Th>
+                {schemaLayers.map((layer) => (
+                  <Table.Th key={layer}>{layer}</Table.Th>
+                ))}
+              </Table.Tr>
+            </Table.Thead>
+            <Table.Tbody>
+              {rows.map((state) => (
+                <Table.Tr key={state}>
+                  <Table.Th scope="row">{state}</Table.Th>
+                  {schemaLayers.map((layer) => {
+                    const key = boxKey(layer, state);
+                    const label = `Load ${layer} for ${state}`;
+                    return (
+                      <Table.Td key={key}>
+                        <Stack gap="xs">
+                          <Checkbox
+                            aria-label={label}
+                            checked={selected.has(key)}
+                            onChange={() => toggle(key)}
+                          />
+                          <LoadStatus load={loadsByBox.get(key)} label={label} />
+                        </Stack>
+                      </Table.Td>
+                    );
+                  })}
+                </Table.Tr>
+              ))}
+            </Table.Tbody>
+          </Table>
+        </Stack>
+      ))}
 
       <Group>
         <Text>{`${selected.size} loads selected`}</Text>
@@ -221,7 +250,7 @@ export function ReferenceAdminPage() {
       </Group>
 
       {startLoads.isError && (
-        <Alert color="red" title="The loads didn't start">
+        <Alert color="var(--color-rust)" title="The loads didn't start">
           <List>
             {errorMessages(startLoads.error).map((message) => (
               <List.Item key={message}>{message}</List.Item>

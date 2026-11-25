@@ -15,6 +15,9 @@ const STATES: StateRead[] = [
 
 const LAYERS = ["boundaries.states", "hydro.wetlands"];
 
+/** LAYERS covers two schemas, so each state gets a row in two tables. */
+const SCHEMA_COUNT = 2;
+
 const SUCCEEDED: LoadRead = {
   layer: "hydro.wetlands",
   state: "TX",
@@ -108,13 +111,29 @@ describe("/admin/reference load table", () => {
     }
   });
 
+  it("shows one table per schema", async () => {
+    stubApi();
+
+    renderRoute(PAGE_URL);
+
+    const boundaries = await screen.findByRole("table", { name: "boundaries" });
+    const hydro = screen.getByRole("table", { name: "hydro" });
+    expect(
+      within(boundaries).getByRole("columnheader", { name: "boundaries.states" }),
+    ).toBeInTheDocument();
+    expect(
+      within(boundaries).queryByRole("columnheader", { name: "hydro.wetlands" }),
+    ).not.toBeInTheDocument();
+    expect(within(hydro).getByRole("columnheader", { name: "hydro.wetlands" })).toBeInTheDocument();
+  });
+
   it("lists a row for each state that already has a load", async () => {
     stubApi({ loads: [SUCCEEDED] });
 
     renderRoute(PAGE_URL);
 
-    expect(await screen.findByRole("rowheader", { name: "TX" })).toBeInTheDocument();
-    expect(screen.queryByRole("rowheader", { name: "NC" })).not.toBeInTheDocument();
+    expect(await screen.findAllByRole("rowheader", { name: "TX" })).toHaveLength(SCHEMA_COUNT);
+    expect(screen.queryAllByRole("rowheader", { name: "NC" })).toHaveLength(0);
   });
 
   it("adds a row for a state found by its code", async () => {
@@ -123,7 +142,7 @@ describe("/admin/reference load table", () => {
 
     await addState("NC");
 
-    expect(await screen.findByRole("rowheader", { name: "NC" })).toBeInTheDocument();
+    expect(await screen.findAllByRole("rowheader", { name: "NC" })).toHaveLength(SCHEMA_COUNT);
   });
 
   it("adds a row for a state found by its full name", async () => {
@@ -132,7 +151,7 @@ describe("/admin/reference load table", () => {
 
     await addState("South Carolina");
 
-    expect(await screen.findByRole("rowheader", { name: "SC" })).toBeInTheDocument();
+    expect(await screen.findAllByRole("rowheader", { name: "SC" })).toHaveLength(SCHEMA_COUNT);
   });
 
   it("disables the Load button until a box is checked", async () => {
