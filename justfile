@@ -47,3 +47,7 @@ api-check:
 api-fix:
     cd api && uv run ruff check --fix .
     cd api && uv run ruff format .
+
+# Run the WEB server (Dev)
+web-dev:
+    cd web && bun run dev
