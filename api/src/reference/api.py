@@ -67,6 +67,20 @@ class StateRead(BaseModel):
     name: str
 
 
+class LayerRead(BaseModel):
+    """A layer, with the names the admin page shows.
+
+    Attributes:
+        name: Table name, such as ``hydro.wetlands``. The page sends this to load it.
+        title: Readable name, such as ``Wetlands``.
+        group: Readable name of the layer's schema, such as ``Water``.
+    """
+
+    name: str
+    title: str
+    group: str
+
+
 class LoadRead(BaseModel):
     """The last load of one layer and state.
 
@@ -301,13 +315,21 @@ def list_states() -> list[StateRead]:
 
 
 @router.get("/layers")
-def list_layers() -> list[str]:
-    """List every layer by name, such as ``boundaries.places``.
+def list_layers() -> list[LayerRead]:
+    """List every layer with its readable name and group.
+
+    The readable names come from each model's ``info``.
 
     Returns:
         Every table with ``state`` and ``geom`` columns, in name order.
     """
-    return sorted(name for name in metadata.tables if layer_table(name) is not None)
+    tables = [
+        table for name, table in sorted(metadata.tables.items()) if layer_table(name) is not None
+    ]
+    return [
+        LayerRead(name=table.fullname, title=table.info["title"], group=table.info["group"])
+        for table in tables
+    ]
 
 
 @router.get("/loads")

@@ -9,6 +9,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 from src.core.database import ReferenceBase
 
 SCHEMA = "hydro"
+SCHEMA_TITLE = "Water"
 
 
 class Wetland(ReferenceBase):
@@ -17,7 +18,7 @@ class Wetland(ReferenceBase):
     __tablename__ = "wetlands"
     __table_args__ = (
         Index("wetlands_geom_idx", "geom", postgresql_using="gist"),
-        {"schema": SCHEMA},
+        {"schema": SCHEMA, "info": {"title": "Wetlands", "group": SCHEMA_TITLE}},
     )
 
     id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
@@ -37,7 +38,7 @@ class Flowline(ReferenceBase):
     __table_args__ = (
         UniqueConstraint("state", "id3dhp"),
         Index("flowlines_geom_idx", "geom", postgresql_using="gist"),
-        {"schema": SCHEMA},
+        {"schema": SCHEMA, "info": {"title": "Streams, rivers, and canals", "group": SCHEMA_TITLE}},
     )
 
     id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
@@ -57,7 +58,7 @@ class Waterbody(ReferenceBase):
     __table_args__ = (
         UniqueConstraint("state", "id3dhp"),
         Index("waterbodies_geom_idx", "geom", postgresql_using="gist"),
-        {"schema": SCHEMA},
+        {"schema": SCHEMA, "info": {"title": "Lakes and ponds", "group": SCHEMA_TITLE}},
     )
 
     id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
@@ -76,7 +77,7 @@ class StreamSegment(ReferenceBase):
     __tablename__ = "stream_segments"
     __table_args__ = (
         Index("stream_segments_geom_idx", "geom", postgresql_using="gist"),
-        {"schema": SCHEMA},
+        {"schema": SCHEMA, "info": {"title": "Classified stream segments", "group": SCHEMA_TITLE}},
     )
 
     id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
@@ -93,7 +94,7 @@ class FloodFema(ReferenceBase):
     __tablename__ = "flood_fema"
     __table_args__ = (
         Index("flood_fema_geom_idx", "geom", postgresql_using="gist"),
-        {"schema": SCHEMA},
+        {"schema": SCHEMA, "info": {"title": "FEMA flood zones", "group": SCHEMA_TITLE}},
     )
 
     id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
@@ -113,7 +114,7 @@ class FloodBle(ReferenceBase):
     __tablename__ = "flood_ble"
     __table_args__ = (
         Index("flood_ble_geom_idx", "geom", postgresql_using="gist"),
-        {"schema": SCHEMA},
+        {"schema": SCHEMA, "info": {"title": "Base level floodplains", "group": SCHEMA_TITLE}},
     )
 
     id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)

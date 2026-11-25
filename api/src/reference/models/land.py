@@ -7,6 +7,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 from src.core.database import ReferenceBase
 
 SCHEMA = "land"
+SCHEMA_TITLE = "Land"
 
 
 class ProtectedArea(ReferenceBase):
@@ -16,7 +17,7 @@ class ProtectedArea(ReferenceBase):
     __table_args__ = (
         CheckConstraint("category IN ('Fee', 'Easement', 'Designation')", name="category"),
         Index("protected_areas_geom_idx", "geom", postgresql_using="gist"),
-        {"schema": SCHEMA},
+        {"schema": SCHEMA, "info": {"title": "Protected areas", "group": SCHEMA_TITLE}},
     )
 
     id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
@@ -36,7 +37,7 @@ class Parcel(ReferenceBase):
     __tablename__ = "parcels"
     __table_args__ = (
         Index("parcels_geom_idx", "geom", postgresql_using="gist"),
-        {"schema": SCHEMA},
+        {"schema": SCHEMA, "info": {"title": "Parcels", "group": SCHEMA_TITLE}},
     )
 
     id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)

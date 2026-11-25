@@ -7,6 +7,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 from src.core.database import ReferenceBase
 
 SCHEMA = "utilities"
+SCHEMA_TITLE = "Utilities"
 
 
 class WaterWell(ReferenceBase):
@@ -16,7 +17,7 @@ class WaterWell(ReferenceBase):
     __table_args__ = (
         UniqueConstraint("state", "state_well_number"),
         Index("water_wells_geom_idx", "geom", postgresql_using="gist"),
-        {"schema": SCHEMA},
+        {"schema": SCHEMA, "info": {"title": "Water wells", "group": SCHEMA_TITLE}},
     )
 
     id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)

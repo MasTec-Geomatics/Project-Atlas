@@ -7,6 +7,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 from src.core.database import ReferenceBase
 
 SCHEMA = "environment"
+SCHEMA_TITLE = "Environment"
 
 
 class CriticalHabitat(ReferenceBase):
@@ -16,7 +17,7 @@ class CriticalHabitat(ReferenceBase):
     __table_args__ = (
         CheckConstraint("designation_status IN ('final', 'proposed')", name="designation_status"),
         Index("critical_habitat_geom_idx", "geom", postgresql_using="gist"),
-        {"schema": SCHEMA},
+        {"schema": SCHEMA, "info": {"title": "Critical habitat", "group": SCHEMA_TITLE}},
     )
 
     id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)

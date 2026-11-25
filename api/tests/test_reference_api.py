@@ -218,12 +218,26 @@ def test_layers() -> None:
     response = client.get(LAYERS_URL)
 
     assert response.status_code == 200
-    layers = response.json()
-    assert "boundaries.states" in layers
-    assert "hydro.wetlands" in layers
-    assert "public.sources" not in layers
-    assert "public.load_runs" not in layers
-    assert layers == sorted(layers)
+    names = [layer["name"] for layer in response.json()]
+    assert "boundaries.states" in names
+    assert "hydro.wetlands" in names
+    assert "public.sources" not in names
+    assert "public.load_runs" not in names
+    assert names == sorted(names)
+
+
+def test_layers_have_readable_names() -> None:
+    """Each layer comes with a readable name and the readable name of its group."""
+    layers = client.get(LAYERS_URL).json()
+
+    assert {"name": "hydro.wetlands", "title": "Wetlands", "group": "Water"} in layers
+
+
+def test_every_layer_has_a_title_and_group() -> None:
+    """No layer is missing its readable name or group."""
+    layers = client.get(LAYERS_URL).json()
+
+    assert [layer["name"] for layer in layers if not layer["title"] or not layer["group"]] == []
 
 
 def test_last_load_of_each_layer_and_state(api_engine: Engine) -> None:

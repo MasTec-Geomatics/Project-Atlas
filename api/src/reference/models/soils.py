@@ -7,6 +7,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 from src.core.database import ReferenceBase
 
 SCHEMA = "soils"
+SCHEMA_TITLE = "Soils"
 
 
 class MapUnit(ReferenceBase):
@@ -15,7 +16,7 @@ class MapUnit(ReferenceBase):
     __tablename__ = "map_units"
     __table_args__ = (
         Index("map_units_geom_idx", "geom", postgresql_using="gist"),
-        {"schema": SCHEMA},
+        {"schema": SCHEMA, "info": {"title": "Soil map units", "group": SCHEMA_TITLE}},
     )
 
     id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
