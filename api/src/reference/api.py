@@ -5,16 +5,22 @@
 - ``/loads``: load a list of layer and state pairs, the admin page's **Load** button, and
   read the last load of each layer and state.
 - ``/sources``: list, add, and edit sources.
-- ``/sources/check``: open a link and match its fields to a layer, before saving.
+- ``/sources/check``: open a link and match its fields to a layer, before saving. The
+  answer streams back as the link downloads, so the page can show the download's progress.
+- ``/sources/checks``: check every loaded layer's source for a newer file, the **Check for
+  updates** button and the weekly scheduled job, and read what the last check found.
 """
 
-from collections.abc import Sequence
+import queue
+import threading
+from collections.abc import Iterator, Sequence
 from datetime import datetime
-from typing import Annotated
+from typing import Annotated, Any, Literal
 
 import httpx
 import structlog
 from fastapi import APIRouter, BackgroundTasks, Body, Depends, HTTPException, status
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import Engine, func, select
 from sqlalchemy.dialects.postgresql import distinct_on
@@ -23,15 +29,17 @@ from sqlalchemy.orm import Session
 
 from src.core.database import reference_engine
 from src.reference.load import (
+    CheckedLink,
     Load,
     LoadError,
     check_link,
+    check_sources,
     layer_table,
     plan_load,
     run_loads,
 )
 from src.reference.models import metadata
-from src.reference.models.public import LoadRun, Source
+from src.reference.models.public import LoadRun, Source, SourceCheck
 from src.reference.state_codes import STATE_FIPS, STATE_NAMES
 
 log = structlog.get_logger(__name__)
@@ -88,6 +96,9 @@ class LoadRead(BaseModel):
         layer: Layer name, such as ``hydro.wetlands``.
         state: Two-letter state code, such as ``TX``.
         status: ``running``, ``succeeded``, or ``failed``.
+        stage: While running: ``downloading``, ``copying``, or ``swapping``.
+        bytes_downloaded: How much of the download has arrived.
+        bytes_total: The download's size, when the source says.
         rows_loaded: Rows in the layer for the state after the load, once it succeeded.
         source_version: The source's version or last-updated date, once it succeeded.
         error: Why the load failed.
@@ -100,6 +111,9 @@ class LoadRead(BaseModel):
     layer: str
     state: str
     status: str
+    stage: str | None
+    bytes_downloaded: int | None
+    bytes_total: int | None
     rows_loaded: int | None
     source_version: str | None
     error: str | None
@@ -258,6 +272,56 @@ class CheckResult(BaseModel):
     layers: list[CheckedLayer]
     source_layer: str | None
     field_mapping: dict[str, str | None]
+
+
+class CheckEvent(BaseModel):
+    """One line of a link check's streamed answer.
+
+    The lines come in order: ``downloading`` (repeated as the file arrives, for a file
+    link), ``reading`` while the fields are read, then ``done`` with the result or
+    ``failed`` with the reason.
+
+    Attributes:
+        stage: ``downloading``, ``reading``, ``done``, or ``failed``.
+        bytes_downloaded: How much of the file has arrived, while downloading.
+        bytes_total: The file's size, while downloading, when the source says.
+        result: What the link holds, when done.
+        error: Why the link couldn't be checked, when failed.
+    """
+
+    stage: Literal["downloading", "reading", "done", "failed"]
+    bytes_downloaded: int | None = None
+    bytes_total: int | None = None
+    result: CheckResult | None = None
+    error: str | None = None
+
+
+class SourceUpdateRead(BaseModel):
+    """A loaded layer whose last change check found a newer file or an error.
+
+    Attributes:
+        layer: Layer name, such as ``hydro.wetlands``.
+        state: Two-letter state code, such as ``TX``.
+        last_pulled: When the layer last loaded successfully for the state.
+        error: Why the source couldn't be checked, or ``None`` when it has a newer file.
+    """
+
+    layer: str
+    state: str
+    last_pulled: datetime | None
+    error: str | None
+
+
+class SourceChecksRead(BaseModel):
+    """What the last change check found.
+
+    Attributes:
+        checked_at: When the last check ran, or ``None`` before the first one.
+        updates: The loaded layers with a newer file or an error, by layer and state.
+    """
+
+    checked_at: datetime | None
+    updates: list[SourceUpdateRead]
 
 
 def get_reference_engine() -> Engine:
@@ -470,33 +534,137 @@ def update_source(source_id: int, body: SourceUpdate, engine: ReferenceEngine) -
         return SourceRead.model_validate(source)
 
 
-@router.post("/sources/check")
-def check_source(body: CheckRequest, engine: ReferenceEngine) -> CheckResult:
-    """Open a link and match its fields to the layer's columns, without saving anything.
-
-    Fields are matched to the layer's current source first, then by the same name as the
-    column, ignoring case. A file link is downloaded first, so this waits for the download.
-
-    Args:
-        body: The link to check.
-        engine: Engine for the reference database.
-
-    Returns:
-        The format, layers, layer to load, and matched fields.
-
-    Raises:
-        HTTPException: 422 for an unknown layer or state code, or a link that can't be
-            opened.
-    """
-    check_layer_and_state(body.layer, body.state)
-    try:
-        checked = check_link(engine, body.layer, body.state, body.download_url, body.access_type)
-    except (LoadError, httpx.HTTPError) as error:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(error)) from error
-
+def check_result(checked: CheckedLink) -> CheckResult:
+    """Turn a checked link into the response the admin page reads."""
     return CheckResult(
         format=checked.format,
         layers=[CheckedLayer(name=item.name, fields=item.fields) for item in checked.layers],
         source_layer=checked.source_layer,
         field_mapping=checked.field_mapping,
     )
+
+
+def check_events(engine: Engine, body: CheckRequest) -> Iterator[str]:
+    """Check a link and yield its progress and answer, one JSON line at a time.
+
+    The check runs in its own thread, so each line is sent as soon as it happens instead
+    of when the check ends.
+
+    Args:
+        engine: Engine for the reference database.
+        body: The link to check.
+
+    Yields:
+        One JSON line per event: download progress, reading, then done or failed.
+    """
+    events: queue.Queue[CheckEvent | None] = queue.Queue()
+
+    def report(stage: str, done: int | None, total: int | None) -> None:
+        if stage == "downloading":
+            events.put(CheckEvent(stage="downloading", bytes_downloaded=done, bytes_total=total))
+        else:
+            events.put(CheckEvent(stage="reading"))
+
+    def run() -> None:
+        try:
+            checked = check_link(
+                engine,
+                body.layer,
+                body.state,
+                body.download_url,
+                body.access_type,
+                progress=report,
+            )
+            events.put(CheckEvent(stage="done", result=check_result(checked)))
+        except (LoadError, httpx.HTTPError, OSError) as error:
+            events.put(CheckEvent(stage="failed", error=str(error) or repr(error)))
+        finally:
+            events.put(None)
+
+    threading.Thread(target=run, daemon=True).start()
+    while (event := events.get()) is not None:
+        yield event.model_dump_json(exclude_unset=True) + "\n"
+
+
+# The Check link answer, for the OpenAPI schema: JSON lines, one CheckEvent per line.
+CHECK_RESPONSES: dict[int | str, dict[str, Any]] = {
+    200: {"model": CheckEvent, "content": {"application/x-ndjson": {}}},
+}
+
+
+@router.post(
+    "/sources/check",
+    response_class=StreamingResponse,
+    responses=CHECK_RESPONSES,
+)
+def check_source(body: CheckRequest, engine: ReferenceEngine) -> StreamingResponse:
+    """Open a link and match its fields to the layer's columns, without saving anything.
+
+    A file link is downloaded into the kept downloads folder, where the load finds it, so
+    the file is downloaded only once. The answer streams back one JSON line at a time: the
+    download's progress, then reading, then the result or why it failed. Fields are
+    matched to the layer's current source first, then by the same name as the column,
+    ignoring case.
+
+    Args:
+        body: The link to check.
+        engine: Engine for the reference database.
+
+    Returns:
+        The streamed answer, as JSON lines (``application/x-ndjson``).
+
+    Raises:
+        HTTPException: 422 for an unknown layer or state code, before anything streams.
+    """
+    check_layer_and_state(body.layer, body.state)
+    return StreamingResponse(check_events(engine, body), media_type="application/x-ndjson")
+
+
+@router.post("/sources/checks", status_code=status.HTTP_204_NO_CONTENT)
+def run_source_checks(engine: ReferenceEngine) -> None:
+    """Check every loaded layer's source for a newer file, without downloading it.
+
+    The admin page's **Check for updates** button and the weekly scheduled job call this.
+    Each answer is recorded in ``public.source_checks``.
+
+    Args:
+        engine: Engine for the reference database.
+    """
+    check_sources(engine)
+
+
+@router.get("/sources/checks")
+def list_source_checks(engine: ReferenceEngine) -> SourceChecksRead:
+    """Read what the last change check found.
+
+    Args:
+        engine: Engine for the reference database.
+
+    Returns:
+        When the last check ran, and each loaded layer and state whose newest check found
+        a newer file or an error, with when it was last loaded.
+    """
+    newest = (
+        select(SourceCheck)
+        .ext(distinct_on(SourceCheck.layer, SourceCheck.state))
+        .order_by(SourceCheck.layer, SourceCheck.state, SourceCheck.checked_at.desc())
+    )
+    pulled = (
+        select(LoadRun.layer, LoadRun.state, func.max(LoadRun.finished_at))
+        .where(LoadRun.status == "succeeded")
+        .group_by(LoadRun.layer, LoadRun.state)
+    )
+    with Session(engine) as session:
+        checked_at = session.scalar(select(func.max(SourceCheck.checked_at)))
+        last_pulled = {(layer, state): at for layer, state, at in session.execute(pulled)}
+        updates = [
+            SourceUpdateRead(
+                layer=check.layer,
+                state=check.state,
+                last_pulled=last_pulled.get((check.layer, check.state)),
+                error=check.error,
+            )
+            for check in session.scalars(newest)
+            if check.update_available or check.error is not None
+        ]
+    return SourceChecksRead(checked_at=checked_at, updates=updates)

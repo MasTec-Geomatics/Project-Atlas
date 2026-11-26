@@ -13,11 +13,16 @@ Each download link goes through the same steps, once per link:
 1. Download the file with ``httpx`` into the kept downloads folder, or use the file
    Check link already downloaded there. A web service is read directly instead.
 2. Stage it as-is into the ``staging`` schema with ``ogr2ogr``, reprojected to EPSG:4326.
+   A load cut at the state line stages only what's inside the state's rectangle.
 3. Swap each state into the final table in its own transaction. Users see the previous
    data until that transaction commits.
-4. Record each state's run in ``public.load_runs``.
+4. Record each state's run in ``public.load_runs``, with its stage (downloading, copying,
+   swapping) and download progress while it runs, for the admin page.
 5. Delete the kept download once every state is swapped in. After a failed swap it stays,
    for the next load to use.
+
+A change check asks each loaded layer's source whether its file changed since the last
+load, without downloading it, and records the answer in ``public.source_checks``.
 """
 
 import hashlib
@@ -26,8 +31,9 @@ import os
 import shutil
 import subprocess
 import tempfile
+import time
 import zipfile
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -50,12 +56,13 @@ from sqlalchemy import (
     select,
     update,
 )
+from sqlalchemy.dialects.postgresql import distinct_on
 from sqlalchemy.orm import Session
 
 from src.core.config import settings
 from src.reference.models import metadata
 from src.reference.models.boundaries import State
-from src.reference.models.public import LoadRun, Source
+from src.reference.models.public import LoadRun, Source, SourceCheck
 from src.reference.state_codes import STATE_FIPS
 
 log = structlog.get_logger(__name__)
@@ -68,6 +75,16 @@ DOWNLOAD_TIMEOUT = httpx.Timeout(60.0)
 # Downloads kept between Check link and the load, so a file is downloaded once. The load
 # deletes a file after every state that uses it is swapped in.
 DOWNLOADS_DIR = settings.reference_work_dir / "downloads"
+
+# Seconds between download progress reports, so a large download isn't reported per chunk.
+PROGRESS_INTERVAL = 1.0
+
+# Reports how much of a download has arrived: bytes downloaded, then the total if known.
+DownloadProgress = Callable[[int, int | None], None]
+
+# Reports a link check's stage (``downloading`` or ``reading``) and, while downloading,
+# the bytes downloaded and the total if known.
+CheckProgress = Callable[[str, int | None, int | None], None]
 
 # GDAL format name to the dataset's file suffix inside a downloaded zip.
 DATASET_SUFFIXES = {
@@ -249,7 +266,8 @@ def run_download(engine: Engine, url: str, loads: Sequence[Load]) -> None:
             recorded as ``failed``, and its final table rows are unchanged.
     """
     runs = [(load, start_run(engine, load.layer, load.state)) for load in loads]
-    pending = {run_id for _, run_id in runs}
+    run_ids = [run_id for _, run_id in runs]
+    pending = set(run_ids)
     url_log = log.bind(url=url, loads=[f"{load.layer}:{load.state}" for load in loads])
     url_log.info("load_started")
     staged_tables: set[str] = set()
@@ -259,14 +277,27 @@ def run_download(engine: Engine, url: str, loads: Sequence[Load]) -> None:
         with tempfile.TemporaryDirectory(
             prefix="reference-load-", dir=settings.reference_work_dir
         ) as work_dir:
-            dataset, source_version = open_dataset(loads[0], Path(work_dir))
+            set_stage(engine, run_ids, "downloading")
+
+            def record_download(done: int, total: int | None) -> None:
+                record_progress(engine, run_ids, done, total)
+
+            dataset, source_version = open_dataset(loads[0], Path(work_dir), record_download)
             staged: dict[tuple[str, str | None], str] = {}
             for load, run_id in runs:
                 key = (load.layer, load.source_layer)
                 if key not in staged:
                     staged[key] = f"{load.table.schema}_{load.table.name}_{len(staged)}"
-                    stage(engine, load, dataset, staged[key])
+                    set_stage(engine, sorted(pending), "copying")
+                    clipped_states = [
+                        item.state
+                        for item in loads
+                        if item.clip_to_state and (item.layer, item.source_layer) == key
+                    ]
+                    extent = state_extent(engine, clipped_states) if clipped_states else None
+                    stage(engine, load, dataset, staged[key], extent)
                     staged_tables.add(staged[key])
+                set_stage(engine, [run_id], "swapping")
                 rows_loaded = swap(engine, load, staged[key])
                 finish_run(
                     engine,
@@ -297,12 +328,15 @@ def run_download(engine: Engine, url: str, loads: Sequence[Load]) -> None:
         drop_staged(engine, staged_tables)
 
 
-def open_dataset(load: Load, work_dir: Path) -> tuple[str, str | None]:
+def open_dataset(
+    load: Load, work_dir: Path, on_progress: DownloadProgress | None = None
+) -> tuple[str, str | None]:
     """Return what ``ogr2ogr`` reads for a load, downloading it first when it's a file.
 
     Args:
         load: The load being run.
         work_dir: Temporary folder for the download.
+        on_progress: Called as the download arrives.
 
     Returns:
         The dataset path or service address, and the source version if known.
@@ -315,7 +349,7 @@ def open_dataset(load: Load, work_dir: Path) -> tuple[str, str | None]:
     suffix = DATASET_SUFFIXES.get(load.format)
     if suffix is None:
         raise LoadError(f"Files in format '{load.format}' can't be loaded")
-    downloaded, source_version = download(load.url)
+    downloaded, source_version = download(load.url, on_progress)
     return str(find_dataset(downloaded, work_dir, [suffix])), source_version
 
 
@@ -324,7 +358,7 @@ def kept_download(url: str) -> Path:
     return DOWNLOADS_DIR / hashlib.sha256(url.encode()).hexdigest()
 
 
-def download(url: str) -> tuple[Path, str | None]:
+def download(url: str, on_progress: DownloadProgress | None = None) -> tuple[Path, str | None]:
     """Download a file into the kept downloads folder, or reuse it if it's already there.
 
     The file is written under a temporary name and renamed when it's complete, so a
@@ -332,6 +366,8 @@ def download(url: str) -> tuple[Path, str | None]:
 
     Args:
         url: Download link.
+        on_progress: Called about once a second as the download arrives, and once when
+            it's complete. A kept file reports as already complete.
 
     Returns:
         Path to the kept file, and the source's ``Last-Modified`` (or ``ETag``) header.
@@ -342,6 +378,9 @@ def download(url: str) -> tuple[Path, str | None]:
     kept = kept_download(url)
     version_file = kept.with_suffix(".version")
     if kept.exists():
+        if on_progress is not None:
+            size = kept.stat().st_size
+            on_progress(size, size)
         version = version_file.read_text() if version_file.exists() else ""
         return kept, version or None
 
@@ -352,9 +391,19 @@ def download(url: str) -> tuple[Path, str | None]:
             if response.is_error:
                 raise LoadError(f"Download failed: HTTP {response.status_code} from {url}")
             source_version = response.headers.get("last-modified") or response.headers.get("etag")
+            length = response.headers.get("content-length")
+            total = int(length) if length is not None and length.isdigit() else None
+            reported_at = time.monotonic()
             with partial.open("wb") as file:
-                for chunk in response.iter_bytes():
+                for chunk in response.iter_raw():
                     file.write(chunk)
+                    if on_progress is not None and (
+                        time.monotonic() - reported_at >= PROGRESS_INTERVAL
+                    ):
+                        on_progress(response.num_bytes_downloaded, total)
+                        reported_at = time.monotonic()
+            if on_progress is not None:
+                on_progress(response.num_bytes_downloaded, total)
     except BaseException:
         partial.unlink(missing_ok=True)
         raise
@@ -407,7 +456,13 @@ def find_dataset(downloaded: Path, work_dir: Path, suffixes: Sequence[str]) -> P
     raise LoadError(f"No {' or '.join(suffixes)} dataset in the download")
 
 
-def stage(engine: Engine, load: Load, dataset: str, staged_name: str) -> None:
+def stage(
+    engine: Engine,
+    load: Load,
+    dataset: str,
+    staged_name: str,
+    extent: tuple[float, float, float, float] | None = None,
+) -> None:
     """Copy the source layer into ``staging.<staged_name>`` as-is, reprojected to EPSG:4326.
 
     Args:
@@ -415,6 +470,8 @@ def stage(engine: Engine, load: Load, dataset: str, staged_name: str) -> None:
         load: The load being run.
         dataset: The dataset path or service address.
         staged_name: Name of the staging table.
+        extent: West, south, east, and north edges in EPSG:4326. Only features inside
+            this rectangle are staged. ``None`` stages every feature.
 
     Raises:
         LoadError: ``ogr2ogr`` is missing or failed.
@@ -424,6 +481,7 @@ def stage(engine: Engine, load: Load, dataset: str, staged_name: str) -> None:
         f"PG:host={url.host} port={url.port or 5432} dbname={url.database} user={url.username}"
     )
     source_layer = [] if load.source_layer is None else [load.source_layer]
+    inside = [] if extent is None else ["-spat", *map(str, extent), "-spat_srs", "EPSG:4326"]
     run_gdal(
         "ogr2ogr",
         [
@@ -443,6 +501,7 @@ def stage(engine: Engine, load: Load, dataset: str, staged_name: str) -> None:
             "GEOMETRY_NAME=geom",
             "-lco",
             "SPATIAL_INDEX=NONE",
+            *inside,
         ],
         password=url.password,
     )
@@ -482,6 +541,28 @@ def final_geometry_type(table: Table) -> str:
     if not isinstance(geometry, Geometry) or geometry.geometry_type is None:
         raise TypeError(f"{table.fullname}.geom is not a typed PostGIS geometry column")
     return geometry.geometry_type
+
+
+def state_extent(engine: Engine, states: Sequence[str]) -> tuple[float, float, float, float] | None:
+    """Return the rectangle around the given states' outlines, from ``boundaries.states``.
+
+    Args:
+        engine: Engine for the reference database.
+        states: Two-letter state codes.
+
+    Returns:
+        West, south, east, and north edges in EPSG:4326, or ``None`` when none of the
+        states' outlines are loaded.
+    """
+    extent = func.ST_Extent(State.geom)
+    query = select(
+        func.ST_XMin(extent), func.ST_YMin(extent), func.ST_XMax(extent), func.ST_YMax(extent)
+    ).where(State.state.in_(states))
+    with engine.connect() as connection:
+        west, south, east, north = connection.execute(query).one()
+    if west is None:
+        return None
+    return float(west), float(south), float(east), float(north)
 
 
 def swap(engine: Engine, load: Load, staged_name: str) -> int:
@@ -600,6 +681,50 @@ def start_run(engine: Engine, layer: str, state: str) -> int:
         return run.id
 
 
+def set_stage(engine: Engine, run_ids: Sequence[int], stage_name: str) -> None:
+    """Record the stage the given running loads are in, for the admin page."""
+    with engine.begin() as connection:
+        connection.execute(update(LoadRun).where(LoadRun.id.in_(run_ids)).values(stage=stage_name))
+
+
+def record_progress(engine: Engine, run_ids: Sequence[int], done: int, total: int | None) -> None:
+    """Record how much of the download the given loads share has arrived."""
+    with engine.begin() as connection:
+        connection.execute(
+            update(LoadRun)
+            .where(LoadRun.id.in_(run_ids))
+            .values(bytes_downloaded=done, bytes_total=total)
+        )
+
+
+def fail_interrupted_runs(engine: Engine) -> int:
+    """Record loads still ``running`` as failed. Run when the API starts.
+
+    A load runs inside the API, so one still ``running`` when the API starts was stopped
+    partway by the API stopping. Its final table rows were not changed.
+
+    Args:
+        engine: Engine for the reference database.
+
+    Returns:
+        How many loads were recorded as failed.
+    """
+    with engine.begin() as connection:
+        result = connection.execute(
+            update(LoadRun)
+            .where(LoadRun.status == "running")
+            .values(
+                status="failed",
+                stage=None,
+                error="The API restarted during this load.",
+                finished_at=func.now(),
+            )
+        )
+    if result.rowcount:
+        log.warning("interrupted_loads_failed", count=result.rowcount)
+    return result.rowcount
+
+
 def finish_run(
     engine: Engine,
     run_id: int,
@@ -616,6 +741,7 @@ def finish_run(
             .where(LoadRun.id == run_id)
             .values(
                 status=status,
+                stage=None,
                 source_version=source_version,
                 rows_loaded=rows_loaded,
                 error=error,
@@ -656,9 +782,18 @@ class CheckedLink:
     field_mapping: dict[str, str | None]
 
 
-def check_link(engine: Engine, layer: str, state: str, url: str, access_type: str) -> CheckedLink:
+def check_link(
+    engine: Engine,
+    layer: str,
+    state: str,
+    url: str,
+    access_type: str,
+    *,
+    progress: CheckProgress | None = None,
+) -> CheckedLink:
     """Open a source link with ``ogrinfo`` and match its fields to a layer's columns.
 
+    A file link is downloaded into the kept downloads folder, where the load finds it.
     Fields are matched to the layer's current source first, then by the same name as the
     column, ignoring case.
 
@@ -668,6 +803,8 @@ def check_link(engine: Engine, layer: str, state: str, url: str, access_type: st
         state: Two-letter state code used to fill ``{state}`` and ``{fips}``.
         url: The link, which may hold ``{state}`` and ``{fips}``.
         access_type: ``file`` or ``service``.
+        progress: Called with the download's progress, then with ``reading`` while the
+            fields are read.
 
     Returns:
         The format, layers, and matched fields.
@@ -689,8 +826,15 @@ def check_link(engine: Engine, layer: str, state: str, url: str, access_type: st
         if access_type == "service":
             dataset = filled_url
         else:
-            downloaded, _ = download(filled_url)
+
+            def report_download(done: int, total: int | None) -> None:
+                if progress is not None:
+                    progress("downloading", done, total)
+
+            downloaded, _ = download(filled_url, report_download)
             dataset = str(find_dataset(downloaded, Path(work_dir), list(DATASET_SUFFIXES.values())))
+        if progress is not None:
+            progress("reading", None, None)
         info: dict[str, Any] = json.loads(run_gdal("ogrinfo", ["-json", "-so", "-al", dataset]))
 
     layers = [
@@ -742,3 +886,74 @@ def pick_layer(layers: list[SourceLayer], current: Source | None, state: str) ->
         return None
     wanted = fill(current.source_layer, state)
     return next((item for item in layers if item.name == wanted), None)
+
+
+def current_version(url: str) -> tuple[str | None, str | None]:
+    """Ask a link for its current version without downloading the file.
+
+    Only the response headers are read; the file itself is not downloaded.
+
+    Args:
+        url: Download link.
+
+    Returns:
+        The ``Last-Modified`` (or ``ETag``) header, and the reason it couldn't be read.
+    """
+    try:
+        with httpx.stream("GET", url, follow_redirects=True, timeout=DOWNLOAD_TIMEOUT) as response:
+            if response.is_error:
+                return None, f"HTTP {response.status_code} from {url}"
+            return response.headers.get("last-modified") or response.headers.get("etag"), None
+    except httpx.HTTPError as error:
+        return None, str(error) or repr(error)
+
+
+def check_sources(engine: Engine) -> None:
+    """Ask each loaded layer's source whether its file changed since the last load.
+
+    Every layer and state with a successful load is checked against the source it would
+    load from now. A link is asked once, even when several states share it. Each answer
+    is recorded in ``public.source_checks``. Web services have no file version, so they
+    are not checked.
+
+    Args:
+        engine: Engine for the reference database.
+    """
+    query = (
+        select(LoadRun)
+        .where(LoadRun.status == "succeeded")
+        .ext(distinct_on(LoadRun.layer, LoadRun.state))
+        .order_by(LoadRun.layer, LoadRun.state, LoadRun.started_at.desc())
+    )
+    with Session(engine) as session:
+        loaded = [(run.layer, run.state, run.source_version) for run in session.scalars(query)]
+
+    versions: dict[str, tuple[str | None, str | None]] = {}
+    checks: list[dict[str, Any]] = []
+    for layer, state, loaded_version in loaded:
+        source = find_source(engine, layer, state)
+        if source is None or source.access_type == "service":
+            continue
+        url = fill(source.download_url, state)
+        if url not in versions:
+            versions[url] = current_version(url)
+        version, error = versions[url]
+        checks.append(
+            {
+                "layer": layer,
+                "state": state,
+                "source_version": version,
+                "update_available": version is not None and version != loaded_version,
+                "error": error,
+            }
+        )
+
+    if checks:
+        with engine.begin() as connection:
+            connection.execute(insert(SourceCheck), checks)
+    log.info(
+        "sources_checked",
+        checked=len(checks),
+        updates=sum(check["update_available"] for check in checks),
+        errors=sum(check["error"] is not None for check in checks),
+    )
