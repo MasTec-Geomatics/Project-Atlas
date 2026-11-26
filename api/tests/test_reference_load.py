@@ -6,6 +6,7 @@ internet.
 """
 
 import json
+import shutil
 import threading
 import zipfile
 from collections.abc import Iterator
@@ -131,6 +132,7 @@ def server(tmp_path: Path, clean_engine: Engine) -> Iterator[tuple[Path, str]]:
     yield tmp_path, f"http://127.0.0.1:{http_server.server_port}"
     http_server.shutdown()
     http_server.server_close()
+    shutil.rmtree(load.DOWNLOADS_DIR, ignore_errors=True)
 
 
 def add_source(engine: Engine, **values: Any) -> None:
@@ -321,9 +323,9 @@ def test_one_download_for_states_sharing_a_file(
     downloads: list[str] = []
     real_download = load.download
 
-    def counting_download(source_url: str, work_dir: Path) -> tuple[Path, str | None]:
+    def counting_download(source_url: str) -> tuple[Path, str | None]:
         downloads.append(source_url)
-        return real_download(source_url, work_dir)
+        return real_download(source_url)
 
     monkeypatch.setitem(vars(load), "download", counting_download)
 
@@ -365,7 +367,10 @@ def test_renamed_field_leaves_the_table_alone(
     add_state_outlines(clean_engine, base_url, folder, ["TX"])
     with clean_engine.begin() as connection:
         connection.execute(
-            text('UPDATE public.sources SET field_mapping = \'{"name": "FULL_NAME"}\'')
+            text(
+                'UPDATE public.sources SET field_mapping = \'{"name": "FULL_NAME"}\' '
+                "WHERE layer = 'boundaries.states'"
+            )
         )
 
     with pytest.raises(LoadError, match="full_name"):
@@ -415,3 +420,74 @@ def test_check_link_matches_fields(clean_engine: Engine, server: tuple[Path, str
         "wetland_type": None,
         "acres": "ACRES",
     }
+
+
+def kept_downloads() -> list[Path]:
+    """The files in the kept downloads folder."""
+    if not load.DOWNLOADS_DIR.exists():
+        return []
+    return sorted(load.DOWNLOADS_DIR.iterdir())
+
+
+def test_load_uses_the_checked_download(clean_engine: Engine, server: tuple[Path, str]) -> None:
+    """A load uses the file Check link downloaded instead of downloading it again."""
+    folder, base_url = server
+    write_zip(folder, "tl_2026_us_state", STATES)
+    url = f"{base_url}/tl_2026_us_state.zip"
+    add_source(
+        clean_engine,
+        layer="boundaries.states",
+        download_url=url,
+        field_mapping={"name": "NAME"},
+        keep={"STUSPS": ["{state}"]},
+    )
+    check_link(clean_engine, "boundaries.states", "TX", url, "file")
+    (folder / "tl_2026_us_state.zip").unlink()
+
+    load_states(clean_engine, "boundaries.states", ["TX"])
+
+    assert rows(clean_engine, text("SELECT name FROM boundaries.states")) == [("Texas",)]
+
+
+def test_load_deletes_the_download_after_the_swap(
+    clean_engine: Engine, server: tuple[Path, str]
+) -> None:
+    """Once every state is swapped in, the kept download is deleted."""
+    folder, base_url = server
+    url = f"{base_url}/tl_2026_us_state.zip"
+    write_zip(folder, "tl_2026_us_state", STATES)
+    check_link(clean_engine, "boundaries.states", "TX", url, "file")
+    assert kept_downloads()
+
+    add_state_outlines(clean_engine, base_url, folder, ["TX", "LA"])
+
+    assert kept_downloads() == []
+
+
+def test_failed_swap_keeps_the_download(clean_engine: Engine, server: tuple[Path, str]) -> None:
+    """A failed swap keeps the download, and the next load uses it."""
+    folder, base_url = server
+    write_zip(folder, "tl_2026_us_state", STATES)
+    add_source(
+        clean_engine,
+        layer="boundaries.states",
+        download_url=f"{base_url}/tl_2026_us_state.zip",
+        field_mapping={"name": "FULL_NAME"},
+        keep={"STUSPS": ["{state}"]},
+    )
+    with pytest.raises(LoadError, match="full_name"):
+        load_states(clean_engine, "boundaries.states", ["TX"])
+    assert kept_downloads()
+
+    (folder / "tl_2026_us_state.zip").unlink()
+    with clean_engine.begin() as connection:
+        connection.execute(
+            text(
+                'UPDATE public.sources SET field_mapping = \'{"name": "NAME"}\' '
+                "WHERE layer = 'boundaries.states'"
+            )
+        )
+    load_states(clean_engine, "boundaries.states", ["TX"])
+
+    assert rows(clean_engine, text("SELECT name FROM boundaries.states")) == [("Texas",)]
+    assert kept_downloads() == []
