@@ -10,13 +10,17 @@ values are filled in for the state being loaded.
 
 Each download link goes through the same steps, once per link:
 
-1. Download the file with ``httpx``. A web service is read directly instead.
+1. Download the file with ``httpx`` into the kept downloads folder, or use the file
+   Check link already downloaded there. A web service is read directly instead.
 2. Stage it as-is into the ``staging`` schema with ``ogr2ogr``, reprojected to EPSG:4326.
 3. Swap each state into the final table in its own transaction. Users see the previous
    data until that transaction commits.
 4. Record each state's run in ``public.load_runs``.
+5. Delete the kept download once every state is swapped in. After a failed swap it stays,
+   for the next load to use.
 """
 
+import hashlib
 import json
 import os
 import shutil
@@ -60,6 +64,10 @@ STAGING_SCHEMA = "staging"
 
 # Connect and read timeouts. Read is per chunk, so large downloads are not cut off.
 DOWNLOAD_TIMEOUT = httpx.Timeout(60.0)
+
+# Downloads kept between Check link and the load, so a file is downloaded once. The load
+# deletes a file after every state that uses it is swapped in.
+DOWNLOADS_DIR = settings.reference_work_dir / "downloads"
 
 # GDAL format name to the dataset's file suffix inside a downloaded zip.
 DATASET_SUFFIXES = {
@@ -276,6 +284,9 @@ def run_download(engine: Engine, url: str, loads: Sequence[Load]) -> None:
                     rows_loaded=rows_loaded,
                     source_version=source_version,
                 )
+        # Every state that uses the file is swapped in, so it's no longer needed. After a
+        # failed swap it stays, for the next load to use.
+        delete_download(url)
     except BaseException as error:
         # BaseException so Ctrl+C is recorded too, instead of leaving 'running' rows.
         for run_id in pending:
@@ -304,41 +315,71 @@ def open_dataset(load: Load, work_dir: Path) -> tuple[str, str | None]:
     suffix = DATASET_SUFFIXES.get(load.format)
     if suffix is None:
         raise LoadError(f"Files in format '{load.format}' can't be loaded")
-    downloaded, source_version = download(load.url, work_dir)
+    downloaded, source_version = download(load.url)
     return str(find_dataset(downloaded, work_dir, [suffix])), source_version
 
 
-def download(url: str, work_dir: Path) -> tuple[Path, str | None]:
-    """Download a file and return its path and source version.
+def kept_download(url: str) -> Path:
+    """Return where a link's download is kept. The same link always gets the same file."""
+    return DOWNLOADS_DIR / hashlib.sha256(url.encode()).hexdigest()
+
+
+def download(url: str) -> tuple[Path, str | None]:
+    """Download a file into the kept downloads folder, or reuse it if it's already there.
+
+    The file is written under a temporary name and renamed when it's complete, so a
+    download that stops partway is never reused.
 
     Args:
         url: Download link.
-        work_dir: Temporary folder for the download.
 
     Returns:
-        Path to the downloaded file, and the source's ``Last-Modified`` (or ``ETag``)
-        header.
+        Path to the kept file, and the source's ``Last-Modified`` (or ``ETag``) header.
 
     Raises:
         LoadError: The link did not return the file.
     """
-    downloaded = work_dir / "download"
-    with httpx.stream("GET", url, follow_redirects=True, timeout=DOWNLOAD_TIMEOUT) as response:
-        if response.is_error:
-            raise LoadError(f"Download failed: HTTP {response.status_code} from {url}")
-        source_version = response.headers.get("last-modified") or response.headers.get("etag")
-        with downloaded.open("wb") as file:
-            for chunk in response.iter_bytes():
-                file.write(chunk)
-    return downloaded, source_version
+    kept = kept_download(url)
+    version_file = kept.with_suffix(".version")
+    if kept.exists():
+        version = version_file.read_text() if version_file.exists() else ""
+        return kept, version or None
+
+    DOWNLOADS_DIR.mkdir(parents=True, exist_ok=True)
+    partial = kept.with_suffix(".part")
+    try:
+        with httpx.stream("GET", url, follow_redirects=True, timeout=DOWNLOAD_TIMEOUT) as response:
+            if response.is_error:
+                raise LoadError(f"Download failed: HTTP {response.status_code} from {url}")
+            source_version = response.headers.get("last-modified") or response.headers.get("etag")
+            with partial.open("wb") as file:
+                for chunk in response.iter_bytes():
+                    file.write(chunk)
+    except BaseException:
+        partial.unlink(missing_ok=True)
+        raise
+
+    version_file.write_text(source_version or "")
+    partial.rename(kept)
+    return kept, source_version
+
+
+def delete_download(url: str) -> None:
+    """Delete a link's kept download, if there is one."""
+    kept = kept_download(url)
+    kept.unlink(missing_ok=True)
+    kept.with_suffix(".version").unlink(missing_ok=True)
 
 
 def find_dataset(downloaded: Path, work_dir: Path, suffixes: Sequence[str]) -> Path:
     """Return the dataset in a download, unzipping it first when it's a zip.
 
+    The kept download is left as it is: a zip is unzipped into ``work_dir``, and any
+    other file is linked there under the dataset's suffix.
+
     Args:
-        downloaded: The downloaded file.
-        work_dir: Temporary folder to unzip into.
+        downloaded: The kept download.
+        work_dir: Temporary folder to unzip or link into.
         suffixes: Dataset suffixes to look for, in order, such as ``[".gpkg"]``.
 
     Returns:
@@ -348,12 +389,13 @@ def find_dataset(downloaded: Path, work_dir: Path, suffixes: Sequence[str]) -> P
         LoadError: No dataset, or more than one, has that suffix.
     """
     if not zipfile.is_zipfile(downloaded):
-        return downloaded.rename(downloaded.with_suffix(suffixes[0]))
+        linked = work_dir / f"dataset{suffixes[0]}"
+        linked.symlink_to(downloaded)
+        return linked
 
     extracted = work_dir / "extracted"
     with zipfile.ZipFile(downloaded) as archive:
         archive.extractall(extracted)
-    downloaded.unlink()
 
     for suffix in suffixes:
         matches = sorted(extracted.rglob(f"*{suffix}"))
@@ -501,7 +543,7 @@ def clipped_rows(
     staged: Table,
     columns: Sequence[Any],
     kept: Sequence[ColumnElement[bool]],
-) -> Select[Any]:
+) -> Select[*tuple[Any, ...]]:
     """Select the staged rows cut at the state line, using ``boundaries.states``.
 
     Args:
@@ -534,7 +576,7 @@ def clipped_rows(
         .where(outline.c.state == load.state, *kept)
         .subquery()
     )
-    return select(inside).where(func.ST_IsEmpty(inside.c.geom).is_(False))
+    return select(*inside.c).where(func.ST_IsEmpty(inside.c.geom).is_(False))
 
 
 def drop_staged(engine: Engine, staged_names: set[str]) -> None:
@@ -647,7 +689,7 @@ def check_link(engine: Engine, layer: str, state: str, url: str, access_type: st
         if access_type == "service":
             dataset = filled_url
         else:
-            downloaded, _ = download(filled_url, Path(work_dir))
+            downloaded, _ = download(filled_url)
             dataset = str(find_dataset(downloaded, Path(work_dir), list(DATASET_SUFFIXES.values())))
         info: dict[str, Any] = json.loads(run_gdal("ogrinfo", ["-json", "-so", "-al", dataset]))
 
