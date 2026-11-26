@@ -8,7 +8,7 @@ from sqlalchemy import Engine, create_engine, delete, make_url, text
 from src.app import app
 from src.core.config import settings
 from src.reference.api import get_reference_engine
-from src.reference.models.public import LoadRun, Source
+from src.reference.models.public import LoadRun, Source, SourceCheck
 from tests.migrations import migrate_reference
 
 TEST_DATABASE = "reference_test"
@@ -44,15 +44,16 @@ def reference_engine() -> Iterator[Engine]:
 
 
 def empty_sources_and_runs(engine: Engine) -> None:
-    """Delete every ``public.sources`` and ``public.load_runs`` row."""
+    """Delete every ``public.sources``, ``public.load_runs``, and ``public.source_checks`` row."""
     with engine.begin() as connection:
         connection.execute(delete(Source))
         connection.execute(delete(LoadRun))
+        connection.execute(delete(SourceCheck))
 
 
 @pytest.fixture
 def clean_engine(reference_engine: Engine) -> Iterator[Engine]:
-    """The reference test database with no sources or load runs, before and after a test.
+    """The reference test database with no sources, load runs, or source checks, before and after.
 
     Yields:
         Engine connected to the reference test database.
@@ -64,7 +65,7 @@ def clean_engine(reference_engine: Engine) -> Iterator[Engine]:
 
 @pytest.fixture
 def api_engine(clean_engine: Engine) -> Iterator[Engine]:
-    """Point the API at the reference test database, with no sources or load runs.
+    """Point the API at the reference test database, with no sources, load runs, or source checks.
 
     Yields:
         Engine connected to the reference test database.

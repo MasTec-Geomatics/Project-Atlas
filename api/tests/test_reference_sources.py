@@ -1,11 +1,17 @@
 """Tests for the sources endpoints, used by the admin page's source forms."""
 
+import json
+from datetime import UTC, datetime
 from typing import Any
 
+import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import Engine
+from sqlalchemy import Engine, insert
 
 from src.app import app
+from src.reference import api
+from src.reference.load import CheckedLink, SourceLayer
+from src.reference.models.public import LoadRun, SourceCheck
 
 client = TestClient(app)
 
@@ -100,8 +106,13 @@ def test_edit_missing_source(api_engine: Engine) -> None:
     assert response.status_code == 404
 
 
+def check_events(response_text: str) -> list[dict[str, Any]]:
+    """Parse the lines a link check streams back."""
+    return [json.loads(line) for line in response_text.splitlines()]
+
+
 def test_check_bad_link(api_engine: Engine) -> None:
-    """A link that can't be opened answers 422 with the reason."""
+    """A link that can't be opened streams the reason as the last line."""
     response = client.post(
         f"{URL}/check",
         json={
@@ -111,4 +122,123 @@ def test_check_bad_link(api_engine: Engine) -> None:
         },
     )
 
+    assert response.status_code == 200
+    *_, last = check_events(response.text)
+    assert last["stage"] == "failed"
+    assert last["error"]
+
+
+def test_check_unknown_layer(api_engine: Engine) -> None:
+    """An unknown layer answers 422 before anything is checked."""
+    response = client.post(
+        f"{URL}/check",
+        json={"layer": "nope.nope", "state": "TX", "download_url": "https://example.com/a.zip"},
+    )
+
     assert response.status_code == 422
+
+
+def test_check_streams_progress_then_the_result(
+    api_engine: Engine, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A link check streams the download progress, then reading, then the result."""
+
+    def fake_check_link(*_args: Any, progress: Any) -> CheckedLink:
+        progress("downloading", 340, 1200)
+        progress("reading", None, None)
+        return CheckedLink(
+            format="GPKG",
+            layers=[SourceLayer(name="places", fields=["NAME"])],
+            source_layer=None,
+            field_mapping={"name": "NAME", "geoid": None},
+        )
+
+    monkeypatch.setitem(vars(api), "check_link", fake_check_link)
+
+    response = client.post(
+        f"{URL}/check",
+        json={"layer": "boundaries.places", "state": "TX", "download_url": "https://example.com/a"},
+    )
+
+    assert response.headers["content-type"].startswith("application/x-ndjson")
+    assert check_events(response.text) == [
+        {"stage": "downloading", "bytes_downloaded": 340, "bytes_total": 1200},
+        {"stage": "reading"},
+        {
+            "stage": "done",
+            "result": {
+                "format": "GPKG",
+                "layers": [{"name": "places", "fields": ["NAME"]}],
+                "source_layer": None,
+                "field_mapping": {"name": "NAME", "geoid": None},
+            },
+        },
+    ]
+
+
+def add_check(
+    engine: Engine, layer: str, state: str, checked: datetime, *, update: bool, error: str | None
+) -> None:
+    """Insert one ``public.source_checks`` row."""
+    with engine.begin() as connection:
+        connection.execute(
+            insert(SourceCheck).values(
+                layer=layer,
+                state=state,
+                checked_at=checked,
+                update_available=update,
+                error=error,
+            )
+        )
+
+
+def test_run_source_checks(api_engine: Engine, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The Check for updates button and the weekly job check every loaded source."""
+    calls: list[Engine] = []
+    monkeypatch.setitem(vars(api), "check_sources", calls.append)
+
+    response = client.post(f"{URL}/checks")
+
+    assert response.status_code == 204
+    assert calls == [api_engine]
+
+
+def test_updates_from_the_last_check(api_engine: Engine) -> None:
+    """Only the layers whose last check found an update or an error are listed."""
+    pulled = datetime(2026, 11, 1, tzinfo=UTC)
+    with api_engine.begin() as connection:
+        connection.execute(
+            insert(LoadRun).values(
+                layer="boundaries.states",
+                state="TX",
+                status="succeeded",
+                started_at=pulled,
+                finished_at=pulled,
+            )
+        )
+    first = datetime(2026, 11, 2, tzinfo=UTC)
+    last = datetime(2026, 11, 9, tzinfo=UTC)
+    add_check(api_engine, "boundaries.states", "TX", first, update=False, error=None)
+    add_check(api_engine, "boundaries.states", "TX", last, update=True, error=None)
+    add_check(api_engine, "boundaries.states", "LA", last, update=False, error=None)
+    add_check(api_engine, "hydro.wetlands", "TX", last, update=False, error="HTTP 404")
+
+    response = client.get(f"{URL}/checks")
+
+    assert response.json() == {
+        "checked_at": "2026-11-09T00:00:00Z",
+        "updates": [
+            {
+                "layer": "boundaries.states",
+                "state": "TX",
+                "last_pulled": "2026-11-01T00:00:00Z",
+                "error": None,
+            },
+            {"layer": "hydro.wetlands", "state": "TX", "last_pulled": None, "error": "HTTP 404"},
+        ],
+    }
+
+
+def test_no_checks_yet(api_engine: Engine) -> None:
+    """Before the first check, there's no check time and nothing to list."""
+    assert client.get(f"{URL}/checks").json() == {"checked_at": None, "updates": []}

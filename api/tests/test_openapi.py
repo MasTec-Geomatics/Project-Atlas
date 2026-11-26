@@ -33,6 +33,8 @@ def test_operation_ids_are_tag_and_function_name() -> None:
             "reference-create_source",
             "reference-update_source",
             "reference-check_source",
+            "reference-run_source_checks",
+            "reference-list_source_checks",
         ]
     )
 

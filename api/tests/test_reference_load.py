@@ -6,8 +6,10 @@ internet.
 """
 
 import json
+import os
 import shutil
 import threading
+import time
 import zipfile
 from collections.abc import Iterator
 from functools import partial
@@ -21,7 +23,7 @@ from sqlalchemy import Engine, TextClause, delete, insert, text
 from src.reference import load
 from src.reference.load import LoadError, check_link, fill, plan_load, run_loads
 from src.reference.models import metadata
-from src.reference.models.public import Source
+from src.reference.models.public import LoadRun, Source
 
 
 def square(lon: float, lat: float, size: float = 0.1) -> list[list[float]]:
@@ -323,9 +325,11 @@ def test_one_download_for_states_sharing_a_file(
     downloads: list[str] = []
     real_download = load.download
 
-    def counting_download(source_url: str) -> tuple[Path, str | None]:
+    def counting_download(
+        source_url: str, on_progress: load.DownloadProgress | None = None
+    ) -> tuple[Path, str | None]:
         downloads.append(source_url)
-        return real_download(source_url)
+        return real_download(source_url, on_progress)
 
     monkeypatch.setitem(vars(load), "download", counting_download)
 
@@ -491,3 +495,165 @@ def test_failed_swap_keeps_the_download(clean_engine: Engine, server: tuple[Path
 
     assert rows(clean_engine, text("SELECT name FROM boundaries.states")) == [("Texas",)]
     assert kept_downloads() == []
+
+
+def current_run(engine: Engine) -> list[tuple[object, ...]]:
+    """The status, stage, and download progress of every ``public.load_runs`` row."""
+    return rows(
+        engine,
+        text("SELECT status, stage, bytes_downloaded, bytes_total FROM public.load_runs"),
+    )
+
+
+def test_load_records_each_stage(
+    clean_engine: Engine, server: tuple[Path, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A running load records downloading, copying data, and swapping data in turn."""
+    folder, base_url = server
+    write_zip(folder, "tl_2026_us_state", STATES)
+    size = (folder / "tl_2026_us_state.zip").stat().st_size
+    add_source(
+        clean_engine,
+        layer="boundaries.states",
+        download_url=f"{base_url}/tl_2026_us_state.zip",
+        field_mapping={"name": "NAME"},
+        keep={"STUSPS": ["{state}"]},
+    )
+    seen: dict[str, list[tuple[object, ...]]] = {}
+
+    def watch(step: str) -> Any:
+        """Wrap a loader step so it records the load's row before running."""
+        step_function = vars(load)[step]
+
+        def watching(*args: Any) -> Any:
+            seen[step] = current_run(clean_engine)
+            return step_function(*args)
+
+        return watching
+
+    for loader_step in ("open_dataset", "stage", "swap"):
+        monkeypatch.setitem(vars(load), loader_step, watch(loader_step))
+
+    load_states(clean_engine, "boundaries.states", ["TX"])
+
+    assert seen == {
+        "open_dataset": [("running", "downloading", None, None)],
+        "stage": [("running", "copying", size, size)],
+        "swap": [("running", "swapping", size, size)],
+    }
+    assert current_run(clean_engine) == [("succeeded", None, size, size)]
+
+
+def test_clipped_load_stages_only_the_state_area(
+    clean_engine: Engine, server: tuple[Path, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A load cut at the state line stages only what's inside the state's rectangle."""
+    folder, base_url = server
+    add_state_outlines(clean_engine, base_url, folder, ["TX"])
+    write_zip(folder, "tl_2026_48_place", PLACES)
+    add_source(
+        clean_engine,
+        layer="boundaries.places",
+        download_url=f"{base_url}/tl_2026_{{fips}}_place.zip",
+        field_mapping={"geoid": "GEOID", "name": "NAME"},
+        clip_to_state=True,
+    )
+    commands: list[list[str]] = []
+    real_run_gdal = load.run_gdal
+
+    def recording_run_gdal(tool: str, arguments: list[str], *, password: str | None = None) -> str:
+        commands.append(arguments)
+        return real_run_gdal(tool, arguments, password=password)
+
+    monkeypatch.setitem(vars(load), "run_gdal", recording_run_gdal)
+
+    load_states(clean_engine, "boundaries.places", ["TX"])
+
+    [staging_command] = commands
+    spat = staging_command.index("-spat")
+    assert [float(value) for value in staging_command[spat + 1 : spat + 5]] == pytest.approx(
+        [-98.0, 31.0, -97.0, 32.0], abs=1e-3
+    )
+    assert staging_command[spat + 5 : spat + 7] == ["-spat_srs", "EPSG:4326"]
+
+
+def test_restart_fails_interrupted_loads(clean_engine: Engine) -> None:
+    """Loads left running when the API stopped are recorded as failed."""
+    with clean_engine.begin() as connection:
+        connection.execute(
+            insert(LoadRun).values(
+                layer="hydro.wetlands", state="TX", status="running", stage="downloading"
+            )
+        )
+
+    load.fail_interrupted_runs(clean_engine)
+
+    assert rows(
+        clean_engine,
+        text("SELECT status, stage, error, finished_at IS NOT NULL FROM public.load_runs"),
+    ) == [("failed", None, "The API restarted during this load.", True)]
+
+
+def test_check_link_reports_its_progress(clean_engine: Engine, server: tuple[Path, str]) -> None:
+    """Checking a link reports the download, then reading the fields."""
+    folder, base_url = server
+    write_zip(folder, "tl_2026_us_state", STATES)
+    size = (folder / "tl_2026_us_state.zip").stat().st_size
+    progress: list[tuple[str, int | None, int | None]] = []
+
+    def report(stage: str, done: int | None, total: int | None) -> None:
+        progress.append((stage, done, total))
+
+    check_link(
+        clean_engine,
+        "boundaries.states",
+        "TX",
+        f"{base_url}/tl_2026_us_state.zip",
+        "file",
+        progress=report,
+    )
+
+    assert progress[-2:] == [("downloading", size, size), ("reading", None, None)]
+
+
+def source_checks(engine: Engine) -> list[tuple[object, ...]]:
+    """The layer, state, result, and error of every ``public.source_checks`` row."""
+    return rows(
+        engine,
+        text(
+            "SELECT layer, state, update_available, error FROM public.source_checks "
+            "ORDER BY checked_at, id"
+        ),
+    )
+
+
+def test_source_check_finds_a_newer_file(clean_engine: Engine, server: tuple[Path, str]) -> None:
+    """A source whose file changed since the last load is marked as having an update."""
+    folder, base_url = server
+    add_state_outlines(clean_engine, base_url, folder, ["TX"])
+
+    load.check_sources(clean_engine)
+    later = time.time() + 3600
+    os.utime(folder / "tl_2026_us_state.zip", (later, later))
+    load.check_sources(clean_engine)
+
+    assert source_checks(clean_engine) == [
+        ("boundaries.states", "TX", False, None),
+        ("boundaries.states", "TX", True, None),
+    ]
+
+
+def test_source_check_records_an_unreachable_source(
+    clean_engine: Engine, server: tuple[Path, str]
+) -> None:
+    """A source that can't be reached is recorded with the reason."""
+    folder, base_url = server
+    add_state_outlines(clean_engine, base_url, folder, ["TX"])
+    (folder / "tl_2026_us_state.zip").unlink()
+
+    load.check_sources(clean_engine)
+
+    [(layer, state, update_available, error)] = source_checks(clean_engine)
+    assert (layer, state, update_available) == ("boundaries.states", "TX", False)
+    assert isinstance(error, str)
+    assert "404" in error
