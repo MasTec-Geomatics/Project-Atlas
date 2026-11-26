@@ -25,6 +25,69 @@ import type {
 
 import { customFetch } from './fetcher';
 import type { ErrorType } from './fetcher';
+export type CheckEventStage = typeof CheckEventStage[keyof typeof CheckEventStage];
+
+
+export const CheckEventStage = {
+  downloading: 'downloading',
+  reading: 'reading',
+  done: 'done',
+  failed: 'failed',
+} as const;
+
+/**
+ * One layer found in the link.
+ *
+ * Attributes:
+ *     name: The layer's name.
+ *     fields: The layer's field names.
+ */
+export interface CheckedLayer {
+  name: string;
+  fields: string[];
+}
+
+export type CheckResultFieldMapping = {[key: string]: string | null};
+
+/**
+ * What the link holds and how its fields match the layer's columns.
+ *
+ * Attributes:
+ *     format: GDAL format name, such as ``GPKG``.
+ *     layers: Every layer in the link.
+ *     source_layer: The layer to load, or ``None`` when it can't be picked.
+ *     field_mapping: Column to matched field, or ``None`` when nothing matched. The
+ *         admin page shows a dropdown of the layer's fields for those.
+ */
+export interface CheckResult {
+  format: string;
+  layers: CheckedLayer[];
+  source_layer: string | null;
+  field_mapping: CheckResultFieldMapping;
+}
+
+/**
+ * One line of a link check's streamed answer.
+ *
+ * The lines come in order: ``downloading`` (repeated as the file arrives, for a file
+ * link), ``reading`` while the fields are read, then ``done`` with the result or
+ * ``failed`` with the reason.
+ *
+ * Attributes:
+ *     stage: ``downloading``, ``reading``, ``done``, or ``failed``.
+ *     bytes_downloaded: How much of the file has arrived, while downloading.
+ *     bytes_total: The file's size, while downloading, when the source says.
+ *     result: What the link holds, when done.
+ *     error: Why the link couldn't be checked, when failed.
+ */
+export interface CheckEvent {
+  stage: CheckEventStage;
+  bytes_downloaded?: number | null;
+  bytes_total?: number | null;
+  result?: CheckResult | null;
+  error?: string | null;
+}
+
 /**
  * A link to open before saving it, from the **Check link** button.
  *
@@ -42,37 +105,6 @@ export interface CheckRequest {
   download_url: string;
   /** @pattern ^(file|service)$ */
   access_type?: string;
-}
-
-export type CheckResultFieldMapping = {[key: string]: string | null};
-
-/**
- * One layer found in the link.
- *
- * Attributes:
- *     name: The layer's name.
- *     fields: The layer's field names.
- */
-export interface CheckedLayer {
-  name: string;
-  fields: string[];
-}
-
-/**
- * What the link holds and how its fields match the layer's columns.
- *
- * Attributes:
- *     format: GDAL format name, such as ``GPKG``.
- *     layers: Every layer in the link.
- *     source_layer: The layer to load, or ``None`` when it can't be picked.
- *     field_mapping: Column to matched field, or ``None`` when nothing matched. The
- *         admin page shows a dropdown of the layer's fields for those.
- */
-export interface CheckResult {
-  format: string;
-  layers: CheckedLayer[];
-  source_layer: string | null;
-  field_mapping: CheckResultFieldMapping;
 }
 
 export type ValidationErrorCtx = { [key: string]: unknown };
@@ -110,6 +142,9 @@ export interface LayerRead {
  *     layer: Layer name, such as ``hydro.wetlands``.
  *     state: Two-letter state code, such as ``TX``.
  *     status: ``running``, ``succeeded``, or ``failed``.
+ *     stage: While running: ``downloading``, ``copying``, or ``swapping``.
+ *     bytes_downloaded: How much of the download has arrived.
+ *     bytes_total: The download's size, when the source says.
  *     rows_loaded: Rows in the layer for the state after the load, once it succeeded.
  *     source_version: The source's version or last-updated date, once it succeeded.
  *     error: Why the load failed.
@@ -120,6 +155,9 @@ export interface LoadRead {
   layer: string;
   state: string;
   status: string;
+  stage: string | null;
+  bytes_downloaded: number | null;
+  bytes_total: number | null;
   rows_loaded: number | null;
   source_version: string | null;
   error: string | null;
@@ -148,6 +186,34 @@ export interface LoadRequest {
  */
 export interface LoadsStarted {
   loads: LoadRequest[];
+}
+
+/**
+ * A loaded layer whose last change check found a newer file or an error.
+ *
+ * Attributes:
+ *     layer: Layer name, such as ``hydro.wetlands``.
+ *     state: Two-letter state code, such as ``TX``.
+ *     last_pulled: When the layer last loaded successfully for the state.
+ *     error: Why the source couldn't be checked, or ``None`` when it has a newer file.
+ */
+export interface SourceUpdateRead {
+  layer: string;
+  state: string;
+  last_pulled: string | null;
+  error: string | null;
+}
+
+/**
+ * What the last change check found.
+ *
+ * Attributes:
+ *     checked_at: When the last check ran, or ``None`` before the first one.
+ *     updates: The loaded layers with a newer file or an error, by layer and state.
+ */
+export interface SourceChecksRead {
+  checked_at: string | null;
+  updates: SourceUpdateRead[];
 }
 
 export type SourceCreateFieldMapping = {[key: string]: string};
@@ -1404,7 +1470,7 @@ export const useReferenceUpdateSource = <TError = ErrorType<HTTPValidationError>
     }
 
 export type referenceCheckSourceResponse200 = {
-  data: CheckResult
+  data: CheckEvent
   status: 200
 }
 
@@ -1433,19 +1499,21 @@ export const getReferenceCheckSourceUrl = () => {
 /**
  * Open a link and match its fields to the layer's columns, without saving anything.
  *
- * Fields are matched to the layer's current source first, then by the same name as the
- * column, ignoring case. A file link is downloaded first, so this waits for the download.
+ * A file link is downloaded into the kept downloads folder, where the load finds it, so
+ * the file is downloaded only once. The answer streams back one JSON line at a time: the
+ * download's progress, then reading, then the result or why it failed. Fields are
+ * matched to the layer's current source first, then by the same name as the column,
+ * ignoring case.
  *
  * Args:
  *     body: The link to check.
  *     engine: Engine for the reference database.
  *
  * Returns:
- *     The format, layers, layer to load, and matched fields.
+ *     The streamed answer, as JSON lines (``application/x-ndjson``).
  *
  * Raises:
- *     HTTPException: 422 for an unknown layer or state code, or a link that can't be
- *         opened.
+ *     HTTPException: 422 for an unknown layer or state code, before anything streams.
  * @summary Check Source
  */
 export const referenceCheckSource = async (checkRequest: CheckRequest, options?: Parameters<typeof customFetch>[1]): Promise<referenceCheckSourceResponse> => {
@@ -1500,19 +1568,21 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     /**
  * Open a link and match its fields to the layer's columns, without saving anything.
  *
- * Fields are matched to the layer's current source first, then by the same name as the
- * column, ignoring case. A file link is downloaded first, so this waits for the download.
+ * A file link is downloaded into the kept downloads folder, where the load finds it, so
+ * the file is downloaded only once. The answer streams back one JSON line at a time: the
+ * download's progress, then reading, then the result or why it failed. Fields are
+ * matched to the layer's current source first, then by the same name as the column,
+ * ignoring case.
  *
  * Args:
  *     body: The link to check.
  *     engine: Engine for the reference database.
  *
  * Returns:
- *     The format, layers, layer to load, and matched fields.
+ *     The streamed answer, as JSON lines (``application/x-ndjson``).
  *
  * Raises:
- *     HTTPException: 422 for an unknown layer or state code, or a link that can't be
- *         opened.
+ *     HTTPException: 422 for an unknown layer or state code, before anything streams.
  * @summary Check Source
  */
 export const useReferenceCheckSource = <TError = ErrorType<HTTPValidationError>,
@@ -1524,4 +1594,265 @@ export const useReferenceCheckSource = <TError = ErrorType<HTTPValidationError>,
         TContext
       > => {
       return useMutation(getReferenceCheckSourceMutationOptions(options), queryClient);
+    }
+
+export type referenceListSourceChecksResponse200 = {
+  data: SourceChecksRead
+  status: 200
+}
+
+export type referenceListSourceChecksResponseSuccess = (referenceListSourceChecksResponse200) & {
+  headers: Headers;
+};
+;
+
+export type referenceListSourceChecksResponse = (referenceListSourceChecksResponseSuccess)
+
+export const getReferenceListSourceChecksUrl = () => {
+
+
+
+
+  return `/api/v1/reference/sources/checks`
+}
+
+/**
+ * Read what the last change check found.
+ *
+ * Args:
+ *     engine: Engine for the reference database.
+ *
+ * Returns:
+ *     When the last check ran, and each loaded layer and state whose newest check found
+ *     a newer file or an error, with when it was last loaded.
+ * @summary List Source Checks
+ */
+export const referenceListSourceChecks = async ( options?: Parameters<typeof customFetch>[1]): Promise<referenceListSourceChecksResponse> => {
+
+  return customFetch<referenceListSourceChecksResponse>(getReferenceListSourceChecksUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getReferenceListSourceChecksQueryKey = () => {
+    return [
+    `/api/v1/reference/sources/checks`
+    ] as const;
+    }
+
+
+export const getReferenceListSourceChecksQueryOptions = <TData = Awaited<ReturnType<typeof referenceListSourceChecks>>, TError = ErrorType<unknown>>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof referenceListSourceChecks>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getReferenceListSourceChecksQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof referenceListSourceChecks>>> = ({ signal }) => referenceListSourceChecks({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof referenceListSourceChecks>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type ReferenceListSourceChecksQueryResult = NonNullable<Awaited<ReturnType<typeof referenceListSourceChecks>>>
+export type ReferenceListSourceChecksQueryError = ErrorType<unknown>
+
+
+/**
+ * Read what the last change check found.
+ *
+ * Args:
+ *     engine: Engine for the reference database.
+ *
+ * Returns:
+ *     When the last check ran, and each loaded layer and state whose newest check found
+ *     a newer file or an error, with when it was last loaded.
+ * @summary List Source Checks
+ */
+export function useReferenceListSourceChecks<TData = Awaited<ReturnType<typeof referenceListSourceChecks>>, TError = ErrorType<unknown>>(
+  options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof referenceListSourceChecks>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof referenceListSourceChecks>>,
+          TError,
+          Awaited<ReturnType<typeof referenceListSourceChecks>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * Read what the last change check found.
+ *
+ * Args:
+ *     engine: Engine for the reference database.
+ *
+ * Returns:
+ *     When the last check ran, and each loaded layer and state whose newest check found
+ *     a newer file or an error, with when it was last loaded.
+ * @summary List Source Checks
+ */
+export function useReferenceListSourceChecks<TData = Awaited<ReturnType<typeof referenceListSourceChecks>>, TError = ErrorType<unknown>>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof referenceListSourceChecks>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof referenceListSourceChecks>>,
+          TError,
+          Awaited<ReturnType<typeof referenceListSourceChecks>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * Read what the last change check found.
+ *
+ * Args:
+ *     engine: Engine for the reference database.
+ *
+ * Returns:
+ *     When the last check ran, and each loaded layer and state whose newest check found
+ *     a newer file or an error, with when it was last loaded.
+ * @summary List Source Checks
+ */
+export function useReferenceListSourceChecks<TData = Awaited<ReturnType<typeof referenceListSourceChecks>>, TError = ErrorType<unknown>>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof referenceListSourceChecks>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * Read what the last change check found.
+ *
+ * Args:
+ *     engine: Engine for the reference database.
+ *
+ * Returns:
+ *     When the last check ran, and each loaded layer and state whose newest check found
+ *     a newer file or an error, with when it was last loaded.
+ * @summary List Source Checks
+ */
+export function useReferenceListSourceChecks<TData = Awaited<ReturnType<typeof referenceListSourceChecks>>, TError = ErrorType<unknown>>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof referenceListSourceChecks>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getReferenceListSourceChecksQueryOptions(options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export type referenceRunSourceChecksResponse204 = {
+  data: void
+  status: 204
+}
+
+export type referenceRunSourceChecksResponseSuccess = (referenceRunSourceChecksResponse204) & {
+  headers: Headers;
+};
+;
+
+export type referenceRunSourceChecksResponse = (referenceRunSourceChecksResponseSuccess)
+
+export const getReferenceRunSourceChecksUrl = () => {
+
+
+
+
+  return `/api/v1/reference/sources/checks`
+}
+
+/**
+ * Check every loaded layer's source for a newer file, without downloading it.
+ *
+ * The admin page's **Check for updates** button and the weekly scheduled job call this.
+ * Each answer is recorded in ``public.source_checks``.
+ *
+ * Args:
+ *     engine: Engine for the reference database.
+ * @summary Run Source Checks
+ */
+export const referenceRunSourceChecks = async ( options?: Parameters<typeof customFetch>[1]): Promise<referenceRunSourceChecksResponse> => {
+
+  return customFetch<referenceRunSourceChecksResponse>(getReferenceRunSourceChecksUrl(),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+
+export const getReferenceRunSourceChecksMutationKey = () => ['referenceRunSourceChecks'] as const;
+
+export const getReferenceRunSourceChecksMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof referenceRunSourceChecks>>, TError,void, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof referenceRunSourceChecks>>, TError,void, TContext> => {
+
+const mutationKey = getReferenceRunSourceChecksMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof referenceRunSourceChecks>>, void> = () => {
+
+
+          return  referenceRunSourceChecks(requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ReferenceRunSourceChecksMutationResult = NonNullable<Awaited<ReturnType<typeof referenceRunSourceChecks>>>
+
+    export type ReferenceRunSourceChecksMutationError = ErrorType<unknown>
+
+
+    /**
+ * Check every loaded layer's source for a newer file, without downloading it.
+ *
+ * The admin page's **Check for updates** button and the weekly scheduled job call this.
+ * Each answer is recorded in ``public.source_checks``.
+ *
+ * Args:
+ *     engine: Engine for the reference database.
+ * @summary Run Source Checks
+ */
+export const useReferenceRunSourceChecks = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof referenceRunSourceChecks>>, TError,void, TContext>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof referenceRunSourceChecks>>,
+        TError,
+        void,
+        TContext
+      > => {
+      return useMutation(getReferenceRunSourceChecksMutationOptions(options), queryClient);
     }

@@ -22,6 +22,9 @@ const SUCCEEDED: LoadRead = {
   layer: "hydro.wetlands",
   state: "TX",
   status: "succeeded",
+  stage: null,
+  bytes_downloaded: null,
+  bytes_total: null,
   rows_loaded: 2233909,
   source_version: "2026-10-01",
   error: null,
@@ -33,6 +36,9 @@ const FAILED: LoadRead = {
   layer: "boundaries.states",
   state: "TX",
   status: "failed",
+  stage: null,
+  bytes_downloaded: null,
+  bytes_total: null,
   rows_loaded: null,
   source_version: null,
   error: "Download failed with status 404",
@@ -288,7 +294,7 @@ describe("/admin/reference load table", () => {
     expect(screen.getByText("0 loads selected")).toBeInTheDocument();
   });
 
-  it("loads a layer for every state from the All states row", async () => {
+  it("loads a layer for every state from the All states column", async () => {
     const fetchStub = stubApi();
     const user = userEvent.setup();
     renderRoute(PAGE_URL);
@@ -304,7 +310,7 @@ describe("/admin/reference load table", () => {
     );
   });
 
-  it("shows how many states are done in the All states row", async () => {
+  it("shows how many states are done in the All states column", async () => {
     stubApi({
       loadsAfterStart: [
         finishedLoad("hydro.wetlands", "NC", "succeeded"),
@@ -323,7 +329,7 @@ describe("/admin/reference load table", () => {
     expect(within(cell).getByRole("progressbar")).toBeInTheDocument();
   });
 
-  it("lists the states that failed in the All states row", async () => {
+  it("lists the states that failed in the All states column", async () => {
     stubApi({
       loadsAfterStart: [
         finishedLoad("hydro.wetlands", "NC", "succeeded"),
@@ -485,6 +491,47 @@ describe("/admin/reference load table", () => {
     expect(within(cell).getByRole("progressbar")).toBeInTheDocument();
   });
 
+  it("shows how much of a running load has downloaded", async () => {
+    stubApi({
+      loads: [
+        { ...RUNNING, stage: "downloading", bytes_downloaded: 356515840, bytes_total: 1288490188 },
+      ],
+    });
+
+    renderRoute(PAGE_URL);
+
+    const cell = await screen.findByRole("cell", { name: /Wetlands for TX/ });
+    expect(within(cell).getByText("Downloading: 340.0 MB of 1.2 GB")).toBeInTheDocument();
+    expect(within(cell).getByRole("progressbar")).toHaveAttribute("aria-valuenow", "28");
+  });
+
+  it("shows a running load's download when its size isn't known", async () => {
+    stubApi({ loads: [{ ...RUNNING, stage: "downloading", bytes_downloaded: 5242880 }] });
+
+    renderRoute(PAGE_URL);
+
+    const cell = await screen.findByRole("cell", { name: /Wetlands for TX/ });
+    expect(within(cell).getByText("Downloading: 5.0 MB")).toBeInTheDocument();
+  });
+
+  it("shows when a running load is copying data", async () => {
+    stubApi({ loads: [{ ...RUNNING, stage: "copying" }] });
+
+    renderRoute(PAGE_URL);
+
+    const cell = await screen.findByRole("cell", { name: /Wetlands for TX/ });
+    expect(within(cell).getByText("Copying data")).toBeInTheDocument();
+  });
+
+  it("shows when a running load is swapping data", async () => {
+    stubApi({ loads: [{ ...RUNNING, stage: "swapping" }] });
+
+    renderRoute(PAGE_URL);
+
+    const cell = await screen.findByRole("cell", { name: /Wetlands for TX/ });
+    expect(within(cell).getByText("Swapping data")).toBeInTheDocument();
+  });
+
   it("shows waiting for a requested load that hasn't started", async () => {
     stubApi();
     renderRoute(PAGE_URL);
@@ -564,5 +611,105 @@ describe("/admin/reference load table", () => {
     await vi.advanceTimersByTimeAsync(3000);
 
     expect(loadRequestCount(fetchStub, "GET")).toBe(1);
+  });
+});
+
+// "Now" for the date tests: 3 days, 10 hours, and 20 minutes after SUCCEEDED finished.
+const NOW = new Date("2026-11-20T12:00:00Z");
+
+/**
+ * Open the Dates menu and pick a time zone and a style.
+ */
+async function pickDates(timeZone: string, style: string, user = userWithTimers()) {
+  await user.click(await screen.findByRole("button", { name: "Dates" }));
+  await user.click(await screen.findByRole("combobox", { name: "Time zone" }));
+  await user.click(await screen.findByRole("option", { name: timeZone }));
+  await user.click(screen.getByRole("radio", { name: style }));
+}
+
+describe("/admin/reference last updated", () => {
+  it("shows how long ago each box was last updated", async () => {
+    vi.useFakeTimers({ now: NOW, shouldAdvanceTime: true });
+    stubApi({ loads: [SUCCEEDED] });
+    renderRoute(PAGE_URL);
+
+    await addState("TX", userWithTimers());
+
+    const cell = await screen.findByRole("cell", { name: /Wetlands for TX/ });
+    expect(await within(cell).findByText("Updated 3 days ago")).toBeInTheDocument();
+  });
+
+  it("shows when a box's last load failed", async () => {
+    vi.useFakeTimers({ now: NOW, shouldAdvanceTime: true });
+    stubApi({ loads: [FAILED] });
+    renderRoute(PAGE_URL);
+
+    await addState("TX", userWithTimers());
+
+    const cell = await screen.findByRole("cell", { name: /States for TX/ });
+    expect(await within(cell).findByText("Failed 3 days ago")).toBeInTheDocument();
+  });
+
+  it("shows when a box has never been loaded", async () => {
+    vi.useFakeTimers({ now: NOW, shouldAdvanceTime: true });
+    stubApi({ loads: [SUCCEEDED] });
+    renderRoute(PAGE_URL);
+
+    await addState("NC", userWithTimers());
+
+    const cell = await screen.findByRole("cell", { name: /Wetlands for NC/ });
+    expect(await within(cell).findByText("Never loaded")).toBeInTheDocument();
+  });
+
+  it("shows the date and local time once a load is 7 days old", async () => {
+    vi.useFakeTimers({ now: NOW, shouldAdvanceTime: true });
+    stubApi({ loads: [{ ...SUCCEEDED, finished_at: "2026-10-20T12:00:00Z" }] });
+    renderRoute(PAGE_URL);
+
+    await addState("TX", userWithTimers());
+
+    const cell = await screen.findByRole("cell", { name: /Wetlands for TX/ });
+    expect(await within(cell).findByText("Updated 2026-10-20 08:00")).toBeInTheDocument();
+  });
+
+  it("shows UTC times with a Z when UTC is picked", async () => {
+    vi.useFakeTimers({ now: NOW, shouldAdvanceTime: true });
+    stubApi({ loads: [SUCCEEDED] });
+    const user = userWithTimers();
+    renderRoute(PAGE_URL);
+    await addState("TX", user);
+
+    await pickDates("UTC", "Full date", user);
+
+    const cell = await screen.findByRole("cell", { name: /Wetlands for TX/ });
+    expect(await within(cell).findByText("Updated 2026-11-17 01:40Z")).toBeInTheDocument();
+  });
+
+  it("shows times in any time zone picked", async () => {
+    vi.useFakeTimers({ now: NOW, shouldAdvanceTime: true });
+    stubApi({ loads: [SUCCEEDED] });
+    const user = userWithTimers();
+    renderRoute(PAGE_URL);
+    await addState("TX", user);
+
+    await pickDates("America/Chicago", "Full date", user);
+
+    const cell = await screen.findByRole("cell", { name: /Wetlands for TX/ });
+    expect(await within(cell).findByText("Updated 2026-11-16 19:40")).toBeInTheDocument();
+  });
+
+  it("keeps the picked date settings after the page is opened again", async () => {
+    vi.useFakeTimers({ now: NOW, shouldAdvanceTime: true });
+    stubApi({ loads: [SUCCEEDED] });
+    const user = userWithTimers();
+    const first = renderRoute(PAGE_URL);
+    await pickDates("UTC", "Full date", user);
+    first.unmount();
+
+    renderRoute(PAGE_URL);
+    await addState("TX", user);
+
+    const cell = await screen.findByRole("cell", { name: /Wetlands for TX/ });
+    expect(await within(cell).findByText("Updated 2026-11-17 01:40Z")).toBeInTheDocument();
   });
 });

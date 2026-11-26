@@ -34,4 +34,6 @@ window.ResizeObserver = ResizedObserver;
 
 afterEach(() => {
   cleanup();
+  // Saved settings, such as the Dates menu's, must not carry over between tests.
+  localStorage.clear();
 });

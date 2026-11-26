@@ -2,7 +2,14 @@ import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
-import type { CheckResult, LayerRead, SourceRead, StateRead } from "@/api/generated";
+import type {
+  CheckEvent,
+  CheckResult,
+  LayerRead,
+  SourceChecksRead,
+  SourceRead,
+  StateRead,
+} from "@/api/generated";
 import { renderRoute } from "@/test/render";
 
 const PAGE_URL = "/admin/reference/sources";
@@ -64,10 +71,49 @@ function jsonBody(init?: RequestInit): unknown {
   return JSON.parse(init.body);
 }
 
+const NO_CHECKS: SourceChecksRead = { checked_at: null, updates: [] };
+
+/**
+ * A streamed link check answer, one JSON line per event.
+ */
+function checkStream(events: CheckEvent[]): Response {
+  const lines = events.map((event) => `${JSON.stringify(event)}\n`).join("");
+  return new Response(lines, { headers: { "content-type": "application/x-ndjson" } });
+}
+
+/**
+ * A streamed link check answer that stays open until the test sends each event.
+ */
+function openCheckStream() {
+  const encoder = new TextEncoder();
+  let controller: ReadableStreamDefaultController<Uint8Array> | undefined;
+  const body = new ReadableStream<Uint8Array>({
+    start(streamController) {
+      controller = streamController;
+    },
+  });
+  return {
+    response: new Response(body, { headers: { "content-type": "application/x-ndjson" } }),
+    send(event: CheckEvent) {
+      controller?.enqueue(encoder.encode(`${JSON.stringify(event)}\n`));
+    },
+    end() {
+      controller?.close();
+    },
+  };
+}
+
+const CHECKED_STREAM: CheckEvent[] = [
+  { stage: "downloading", bytes_downloaded: 1024, bytes_total: 1024 },
+  { stage: "reading" },
+  { stage: "done", result: CHECKED },
+];
+
 interface StubOptions {
   sources?: SourceRead[];
   check?: () => Response;
   save?: () => Response;
+  checks?: SourceChecksRead;
 }
 
 /**
@@ -75,7 +121,12 @@ interface StubOptions {
  *
  * Returns the stub so tests can check the requests sent.
  */
-function stubApi({ sources = [WETLANDS, PLACES_TX], check, save }: StubOptions = {}) {
+function stubApi({
+  sources = [WETLANDS, PLACES_TX],
+  check,
+  save,
+  checks = NO_CHECKS,
+}: StubOptions = {}) {
   const fetchStub = vi.fn(async (url: string, init?: RequestInit) => {
     const method = init?.method ?? "GET";
 
@@ -84,7 +135,13 @@ function stubApi({ sources = [WETLANDS, PLACES_TX], check, save }: StubOptions =
     if (url === "/api/v1/reference/loads") return Response.json([]);
     if (url === "/api/v1/reference/sources" && method === "GET") return Response.json(sources);
     if (url === "/api/v1/reference/sources/check") {
-      return check ? check() : Response.json(CHECKED);
+      return check ? check() : checkStream(CHECKED_STREAM);
+    }
+    if (url === "/api/v1/reference/sources/checks" && method === "GET") {
+      return Response.json(checks);
+    }
+    if (url === "/api/v1/reference/sources/checks" && method === "POST") {
+      return new Response(null, { status: 204 });
     }
     if (url.startsWith("/api/v1/reference/sources") && method !== "GET") {
       if (save) return save();
@@ -128,7 +185,15 @@ async function startNewSource(user = userEvent.setup()) {
   );
 }
 
+// "Now" for the date tests.
+const NOW = new Date("2026-11-20T12:00:00Z");
+
+function userWithTimers() {
+  return userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+}
+
 afterEach(() => {
+  vi.useRealTimers();
   vi.unstubAllGlobals();
 });
 
@@ -246,9 +311,35 @@ describe("/admin/reference/sources", () => {
     expect(within(form).getByRole("combobox", { name: "population" })).toHaveValue("");
   });
 
+  it("shows the download's progress, then reading, while the link is checked", async () => {
+    const stream = openCheckStream();
+    stubApi({ check: () => stream.response });
+    const user = userEvent.setup();
+    renderRoute(PAGE_URL);
+    await startNewSource(user);
+
+    await user.click(screen.getByRole("button", { name: "Check link" }));
+    stream.send({ stage: "downloading", bytes_downloaded: 356515840, bytes_total: 1288490188 });
+
+    const form = screen.getByRole("dialog");
+    expect(await within(form).findByText("Downloading: 340.0 MB of 1.2 GB")).toBeInTheDocument();
+    expect(within(form).getByRole("progressbar", { name: "Check link progress" })).toHaveAttribute(
+      "aria-valuenow",
+      "28",
+    );
+
+    stream.send({ stage: "reading" });
+    expect(await within(form).findByText("Reading fields")).toBeInTheDocument();
+
+    stream.send({ stage: "done", result: CHECKED });
+    stream.end();
+    expect(await within(form).findByText("GPKG")).toBeInTheDocument();
+    expect(within(form).queryByRole("progressbar")).not.toBeInTheDocument();
+  });
+
   it("shows why a link couldn't be checked", async () => {
     stubApi({
-      check: () => Response.json({ detail: "Download failed with status 404" }, { status: 422 }),
+      check: () => checkStream([{ stage: "failed", error: "Download failed with status 404" }]),
     });
     const user = userEvent.setup();
     renderRoute(PAGE_URL);
@@ -350,6 +441,90 @@ describe("/admin/reference/sources", () => {
     await user.type(screen.getByRole("textbox", { name: "Link" }), "x");
 
     expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+  });
+
+  it("says when sources haven't been checked for updates yet", async () => {
+    stubApi();
+
+    renderRoute(PAGE_URL);
+
+    expect(await screen.findByText("Not checked for updates yet")).toBeInTheDocument();
+  });
+
+  it("says when every loaded layer is up to date", async () => {
+    vi.useFakeTimers({ now: NOW, shouldAdvanceTime: true });
+    stubApi({ checks: { checked_at: "2026-11-19T12:00:00Z", updates: [] } });
+
+    renderRoute(PAGE_URL);
+
+    expect(await screen.findByText("Every loaded layer is up to date.")).toBeInTheDocument();
+    expect(screen.getByText("Last checked 1 day ago")).toBeInTheDocument();
+  });
+
+  it("lists the loaded layers with a newer file or a problem", async () => {
+    vi.useFakeTimers({ now: NOW, shouldAdvanceTime: true });
+    stubApi({
+      checks: {
+        checked_at: "2026-11-19T12:00:00Z",
+        updates: [
+          {
+            layer: "hydro.wetlands",
+            state: "TX",
+            last_pulled: "2026-11-01T12:00:00Z",
+            error: null,
+          },
+          {
+            layer: "boundaries.places",
+            state: "NC",
+            last_pulled: null,
+            error: "HTTP 404 from https://example.gov/nc.zip",
+          },
+        ],
+      },
+    });
+
+    renderRoute(PAGE_URL);
+
+    const updates = await screen.findByRole("table", { name: "Updates" });
+    const wetlands = within(updates).getByRole("row", { name: /Wetlands/ });
+    expect(within(wetlands).getByText("TX")).toBeInTheDocument();
+    expect(within(wetlands).getByText("Newer file available")).toBeInTheDocument();
+    expect(within(wetlands).getByText("2026-11-01 07:00")).toBeInTheDocument();
+    const places = within(updates).getByRole("row", { name: /Cities and towns/ });
+    expect(
+      within(places).getByText("Couldn't check: HTTP 404 from https://example.gov/nc.zip"),
+    ).toBeInTheDocument();
+  });
+
+  it("shows the check dates in the time zone and style picked in Dates", async () => {
+    vi.useFakeTimers({ now: NOW, shouldAdvanceTime: true });
+    stubApi({ checks: { checked_at: "2026-11-19T12:00:00Z", updates: [] } });
+    const user = userWithTimers();
+    renderRoute(PAGE_URL);
+
+    await user.click(await screen.findByRole("button", { name: "Dates" }));
+    await user.click(await screen.findByRole("combobox", { name: "Time zone" }));
+    await user.click(await screen.findByRole("option", { name: "UTC" }));
+    await user.click(screen.getByRole("radio", { name: "Full date" }));
+
+    expect(await screen.findByText("Last checked 2026-11-19 12:00Z")).toBeInTheDocument();
+  });
+
+  it("checks every loaded source with Check for updates", async () => {
+    const fetchStub = stubApi();
+    const user = userEvent.setup();
+    renderRoute(PAGE_URL);
+
+    await user.click(await screen.findByRole("button", { name: "Check for updates" }));
+
+    await waitFor(() =>
+      expect(requests(fetchStub, "/api/v1/reference/sources/checks", "POST")).toHaveLength(1),
+    );
+    await waitFor(() =>
+      expect(requests(fetchStub, "/api/v1/reference/sources/checks", "GET").length).toBeGreaterThan(
+        1,
+      ),
+    );
   });
 
   it("opens a source's current settings with Edit", async () => {
