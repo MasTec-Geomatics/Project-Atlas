@@ -51,15 +51,20 @@ class Source(ReferenceBase):
 class LoadRun(ReferenceBase):
     """One row per load of a layer for a state.
 
-    While a load is running, ``stage`` is ``downloading``, ``copying`` (into staging), or
-    ``swapping`` (into the final table), and the download's progress is in
-    ``bytes_downloaded`` and ``bytes_total``. ``stage`` is cleared when the load ends.
+    While a load is running, ``stage`` is ``downloading``, ``unzipping``, ``copying`` (into
+    staging), or ``swapping`` (into the final table). ``progress_done`` and
+    ``progress_total`` say how far along the stage is: bytes while downloading or
+    unzipping, percent while copying, and nothing while swapping. ``progress_total`` is
+    also empty while downloading when the source doesn't say the file's size. The stage and
+    its progress are cleared when the load ends.
     """
 
     __tablename__ = "load_runs"
     __table_args__ = (
         CheckConstraint("status IN ('running', 'succeeded', 'failed')", name="status"),
-        CheckConstraint("stage IN ('downloading', 'copying', 'swapping')", name="stage"),
+        CheckConstraint(
+            "stage IN ('downloading', 'unzipping', 'copying', 'swapping')", name="stage"
+        ),
         Index("load_runs_layer_state_started_idx", "layer", "state", "started_at"),
         {"schema": "public"},
     )
@@ -69,8 +74,8 @@ class LoadRun(ReferenceBase):
     state: Mapped[str]
     status: Mapped[str]
     stage: Mapped[str | None]
-    bytes_downloaded: Mapped[int | None] = mapped_column(BigInteger)
-    bytes_total: Mapped[int | None] = mapped_column(BigInteger)
+    progress_done: Mapped[int | None] = mapped_column(BigInteger)
+    progress_total: Mapped[int | None] = mapped_column(BigInteger)
     source_version: Mapped[str | None]
     rows_loaded: Mapped[int | None]
     error: Mapped[str | None]

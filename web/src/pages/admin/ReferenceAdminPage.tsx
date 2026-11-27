@@ -30,7 +30,7 @@ import { useDateSettings } from "@/dates/dateSettings";
 import { formatDate } from "@/dates/formatDate";
 
 import classes from "./ReferenceAdminPage.module.css";
-import { downloadPercent, downloadText } from "./formatBytes";
+import { percentDone, stageText } from "./progressText";
 
 /** How often the page asks for load status while a load is waiting or running. */
 const LOAD_STATUS_INTERVAL_MS = 3000;
@@ -108,28 +108,11 @@ interface LoadStatusProps {
   label: string;
 }
 
-/** What a running load is doing, by its stage. */
-const STAGE_TEXT: Record<string, string> = {
-  copying: "Copying data",
-  swapping: "Swapping data",
-};
-
-/**
- * What a running load is doing, such as `Downloading: 340.0 MB of 1.2 GB`, or `null`
- * before it reports a stage.
- */
-function runningText(load: LoadRead): string | null {
-  if (load.stage === "downloading") {
-    return downloadText(load.bytes_downloaded, load.bytes_total);
-  }
-  return load.stage === null ? null : (STAGE_TEXT[load.stage] ?? null);
-}
-
 /**
  * One box's load: waiting, a bar and what it's doing while running, then the result.
  *
- * While downloading a file of known size, the bar fills as the file arrives. Otherwise
- * it stays full and moving.
+ * While downloading, unzipping, or copying, the bar fills as the stage goes, such as
+ * `Unzipping: 340.0 MB of 1.2 GB`. When the stage has no count, it stays full and moving.
  */
 function LoadStatus({ load, label }: LoadStatusProps) {
   if (load === undefined) return null;
@@ -143,11 +126,8 @@ function LoadStatus({ load, label }: LoadStatusProps) {
   }
 
   if (load.status === "running") {
-    const percent =
-      load.stage === "downloading"
-        ? downloadPercent(load.bytes_downloaded, load.bytes_total)
-        : null;
-    const text = runningText(load);
+    const percent = percentDone(load.progress_done, load.progress_total);
+    const text = stageText(load.stage, load.progress_done, load.progress_total);
     return (
       <Stack gap={4}>
         <Progress value={percent ?? 100} striped animated aria-label={`${label} running`} />

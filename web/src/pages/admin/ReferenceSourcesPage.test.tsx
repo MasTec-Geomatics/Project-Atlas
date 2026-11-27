@@ -8,6 +8,7 @@ import type {
   LayerRead,
   SourceChecksRead,
   SourceRead,
+  SourcesCheckEvent,
   StateRead,
 } from "@/api/generated";
 import { renderRoute } from "@/test/render";
@@ -74,17 +75,17 @@ function jsonBody(init?: RequestInit): unknown {
 const NO_CHECKS: SourceChecksRead = { checked_at: null, updates: [] };
 
 /**
- * A streamed link check answer, one JSON line per event.
+ * A streamed answer, one JSON line per event.
  */
-function checkStream(events: CheckEvent[]): Response {
+function checkStream(events: (CheckEvent | SourcesCheckEvent)[]): Response {
   const lines = events.map((event) => `${JSON.stringify(event)}\n`).join("");
   return new Response(lines, { headers: { "content-type": "application/x-ndjson" } });
 }
 
 /**
- * A streamed link check answer that stays open until the test sends each event.
+ * A streamed answer that stays open until the test sends each event.
  */
-function openCheckStream() {
+function openStream<Event>() {
   const encoder = new TextEncoder();
   let controller: ReadableStreamDefaultController<Uint8Array> | undefined;
   const body = new ReadableStream<Uint8Array>({
@@ -94,7 +95,7 @@ function openCheckStream() {
   });
   return {
     response: new Response(body, { headers: { "content-type": "application/x-ndjson" } }),
-    send(event: CheckEvent) {
+    send(event: Event) {
       controller?.enqueue(encoder.encode(`${JSON.stringify(event)}\n`));
     },
     end() {
@@ -104,7 +105,8 @@ function openCheckStream() {
 }
 
 const CHECKED_STREAM: CheckEvent[] = [
-  { stage: "downloading", bytes_downloaded: 1024, bytes_total: 1024 },
+  { stage: "downloading", progress_done: 1024, progress_total: 1024 },
+  { stage: "unzipping", progress_done: 4096, progress_total: 4096 },
   { stage: "reading" },
   { stage: "done", result: CHECKED },
 ];
@@ -114,6 +116,7 @@ interface StubOptions {
   check?: () => Response;
   save?: () => Response;
   checks?: SourceChecksRead;
+  runChecks?: () => Response;
 }
 
 /**
@@ -126,6 +129,7 @@ function stubApi({
   check,
   save,
   checks = NO_CHECKS,
+  runChecks,
 }: StubOptions = {}) {
   const fetchStub = vi.fn(async (url: string, init?: RequestInit) => {
     const method = init?.method ?? "GET";
@@ -141,7 +145,7 @@ function stubApi({
       return Response.json(checks);
     }
     if (url === "/api/v1/reference/sources/checks" && method === "POST") {
-      return new Response(null, { status: 204 });
+      return runChecks ? runChecks() : checkStream([{ stage: "done", checked: 0, total: 0 }]);
     }
     if (url.startsWith("/api/v1/reference/sources") && method !== "GET") {
       if (save) return save();
@@ -311,21 +315,28 @@ describe("/admin/reference/sources", () => {
     expect(within(form).getByRole("combobox", { name: "population" })).toHaveValue("");
   });
 
-  it("shows the download's progress, then reading, while the link is checked", async () => {
-    const stream = openCheckStream();
+  it("shows the download, then the unzip, then reading, while the link is checked", async () => {
+    const stream = openStream<CheckEvent>();
     stubApi({ check: () => stream.response });
     const user = userEvent.setup();
     renderRoute(PAGE_URL);
     await startNewSource(user);
 
     await user.click(screen.getByRole("button", { name: "Check link" }));
-    stream.send({ stage: "downloading", bytes_downloaded: 356515840, bytes_total: 1288490188 });
+    stream.send({ stage: "downloading", progress_done: 356515840, progress_total: 1288490188 });
 
     const form = screen.getByRole("dialog");
     expect(await within(form).findByText("Downloading: 340.0 MB of 1.2 GB")).toBeInTheDocument();
     expect(within(form).getByRole("progressbar", { name: "Check link progress" })).toHaveAttribute(
       "aria-valuenow",
       "28",
+    );
+
+    stream.send({ stage: "unzipping", progress_done: 644245094, progress_total: 1288490188 });
+    expect(await within(form).findByText("Unzipping: 614.4 MB of 1.2 GB")).toBeInTheDocument();
+    expect(within(form).getByRole("progressbar", { name: "Check link progress" })).toHaveAttribute(
+      "aria-valuenow",
+      "50",
     );
 
     stream.send({ stage: "reading" });
@@ -510,7 +521,7 @@ describe("/admin/reference/sources", () => {
     expect(await screen.findByText("Last checked 2026-11-19 12:00Z")).toBeInTheDocument();
   });
 
-  it("checks every loaded source with Check for updates", async () => {
+  it("checks every loaded source with Check for updates, then shows what it found", async () => {
     const fetchStub = stubApi();
     const user = userEvent.setup();
     renderRoute(PAGE_URL);
@@ -525,6 +536,47 @@ describe("/admin/reference/sources", () => {
         1,
       ),
     );
+  });
+
+  it("shows each source while Check for updates runs", async () => {
+    const stream = openStream<SourcesCheckEvent>();
+    stubApi({ runChecks: () => stream.response });
+    const user = userEvent.setup();
+    renderRoute(PAGE_URL);
+
+    await user.click(await screen.findByRole("button", { name: "Check for updates" }));
+    stream.send({
+      stage: "checking",
+      checked: 2,
+      total: 4,
+      layer: "hydro.wetlands",
+      state: "TX",
+    });
+
+    expect(await screen.findByText("Checking Wetlands for TX (3 of 4)")).toBeInTheDocument();
+    expect(screen.getByRole("progressbar", { name: "Check for updates progress" })).toHaveAttribute(
+      "aria-valuenow",
+      "50",
+    );
+    expect(screen.getByRole("button", { name: "Check for updates" })).toBeDisabled();
+
+    stream.send({ stage: "done", checked: 4, total: 4 });
+    stream.end();
+    await waitFor(() => expect(screen.queryByRole("progressbar")).not.toBeInTheDocument());
+    expect(screen.getByRole("button", { name: "Check for updates" })).toBeEnabled();
+  });
+
+  it("shows why Check for updates couldn't finish", async () => {
+    stubApi({
+      runChecks: () =>
+        checkStream([{ stage: "failed", error: "the reference database went away" }]),
+    });
+    const user = userEvent.setup();
+    renderRoute(PAGE_URL);
+
+    await user.click(await screen.findByRole("button", { name: "Check for updates" }));
+
+    expect(await screen.findByText("the reference database went away")).toBeInTheDocument();
   });
 
   it("opens a source's current settings with Edit", async () => {

@@ -273,23 +273,23 @@ def test_no_loads_yet(api_engine: Engine) -> None:
 
 
 def test_running_load_shows_its_stage(api_engine: Engine) -> None:
-    """A running load comes back with its stage and how much has downloaded."""
+    """A running load comes back with its stage and how far along that stage is."""
     with api_engine.begin() as connection:
         connection.execute(
             insert(LoadRun).values(
                 layer="hydro.wetlands",
                 state="TX",
                 status="running",
-                stage="downloading",
-                bytes_downloaded=340,
-                bytes_total=1200,
+                stage="unzipping",
+                progress_done=340,
+                progress_total=1200,
             )
         )
 
     [load] = client.get(URL).json()
 
-    assert (load["stage"], load["bytes_downloaded"], load["bytes_total"]) == (
-        "downloading",
+    assert (load["stage"], load["progress_done"], load["progress_total"]) == (
+        "unzipping",
         340,
         1200,
     )

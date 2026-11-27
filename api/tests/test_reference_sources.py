@@ -7,6 +7,7 @@ from typing import Any
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import Engine, insert
+from sqlalchemy.exc import SQLAlchemyError
 
 from src.app import app
 from src.reference import api
@@ -107,7 +108,7 @@ def test_edit_missing_source(api_engine: Engine) -> None:
 
 
 def check_events(response_text: str) -> list[dict[str, Any]]:
-    """Parse the lines a link check streams back."""
+    """Parse the JSON lines a check streams back."""
     return [json.loads(line) for line in response_text.splitlines()]
 
 
@@ -141,10 +142,11 @@ def test_check_unknown_layer(api_engine: Engine) -> None:
 def test_check_streams_progress_then_the_result(
     api_engine: Engine, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A link check streams the download progress, then reading, then the result."""
+    """A link check streams the download, then the unzip, then reading, then the result."""
 
     def fake_check_link(*_args: Any, progress: Any) -> CheckedLink:
         progress("downloading", 340, 1200)
+        progress("unzipping", 500, 4000)
         progress("reading", None, None)
         return CheckedLink(
             format="GPKG",
@@ -162,7 +164,8 @@ def test_check_streams_progress_then_the_result(
 
     assert response.headers["content-type"].startswith("application/x-ndjson")
     assert check_events(response.text) == [
-        {"stage": "downloading", "bytes_downloaded": 340, "bytes_total": 1200},
+        {"stage": "downloading", "progress_done": 340, "progress_total": 1200},
+        {"stage": "unzipping", "progress_done": 500, "progress_total": 4000},
         {"stage": "reading"},
         {
             "stage": "done",
@@ -192,15 +195,50 @@ def add_check(
         )
 
 
-def test_run_source_checks(api_engine: Engine, monkeypatch: pytest.MonkeyPatch) -> None:
-    """The Check for updates button and the weekly job check every loaded source."""
-    calls: list[Engine] = []
-    monkeypatch.setitem(vars(api), "check_sources", calls.append)
+def test_run_source_checks_streams_each_source(
+    api_engine: Engine, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Check for updates streams each source as it's checked, then how many were checked."""
+
+    def fake_check_sources(engine: Engine, *, progress: Any) -> int:
+        assert engine is api_engine
+        progress(0, 2, "hydro.wetlands", "NC")
+        progress(1, 2, "hydro.wetlands", "TX")
+        return 2
+
+    monkeypatch.setitem(vars(api), "check_sources", fake_check_sources)
 
     response = client.post(f"{URL}/checks")
 
-    assert response.status_code == 204
-    assert calls == [api_engine]
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("application/x-ndjson")
+    assert check_events(response.text) == [
+        {"stage": "checking", "checked": 0, "total": 2, "layer": "hydro.wetlands", "state": "NC"},
+        {"stage": "checking", "checked": 1, "total": 2, "layer": "hydro.wetlands", "state": "TX"},
+        {"stage": "done", "checked": 2, "total": 2},
+    ]
+
+
+def test_run_source_checks_with_nothing_loaded(api_engine: Engine) -> None:
+    """With no layer loaded yet, the check ends right away with nothing checked."""
+    response = client.post(f"{URL}/checks")
+
+    assert check_events(response.text) == [{"stage": "done", "checked": 0, "total": 0}]
+
+
+def test_run_source_checks_failure(api_engine: Engine, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A check that can't finish streams the reason as the last line."""
+
+    def failing_check_sources(_engine: Engine, *, progress: Any) -> int:
+        progress(0, 1, "hydro.wetlands", "TX")
+        raise SQLAlchemyError("the reference database went away")
+
+    monkeypatch.setitem(vars(api), "check_sources", failing_check_sources)
+
+    response = client.post(f"{URL}/checks")
+
+    *_, last = check_events(response.text)
+    assert last == {"stage": "failed", "error": "the reference database went away"}
 
 
 def test_updates_from_the_last_check(api_engine: Engine) -> None:

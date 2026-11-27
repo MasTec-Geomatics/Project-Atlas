@@ -11,13 +11,14 @@ values are filled in for the state being loaded.
 Each download link goes through the same steps, once per link:
 
 1. Download the file with ``httpx`` into the kept downloads folder, or use the file
-   Check link already downloaded there. A web service is read directly instead.
+   Check link already downloaded there, then unzip it. A web service is read directly
+   instead.
 2. Stage it as-is into the ``staging`` schema with ``ogr2ogr``, reprojected to EPSG:4326.
    A load cut at the state line stages only what's inside the state's rectangle.
 3. Swap each state into the final table in its own transaction. Users see the previous
    data until that transaction commits.
-4. Record each state's run in ``public.load_runs``, with its stage (downloading, copying,
-   swapping) and download progress while it runs, for the admin page.
+4. Record each state's run in ``public.load_runs``, with its stage (downloading,
+   unzipping, copying, swapping) and how far along the stage is, for the admin page.
 5. Delete the kept download once every state is swapped in. After a failed swap it stays,
    for the next load to use.
 
@@ -36,7 +37,7 @@ import zipfile
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import IO, Any
 
 import httpx
 import structlog
@@ -76,15 +77,23 @@ DOWNLOAD_TIMEOUT = httpx.Timeout(60.0)
 # deletes a file after every state that uses it is swapped in.
 DOWNLOADS_DIR = settings.reference_work_dir / "downloads"
 
-# Seconds between download progress reports, so a large download isn't reported per chunk.
+# Seconds between progress reports, so a large download or unzip isn't reported per chunk.
 PROGRESS_INTERVAL = 1.0
 
-# Reports how much of a download has arrived: bytes downloaded, then the total if known.
-DownloadProgress = Callable[[int, int | None], None]
+# Bytes read at a time while unzipping, so a large file reports its progress as it goes.
+UNZIP_CHUNK_SIZE = 1024 * 1024
 
-# Reports a link check's stage (``downloading`` or ``reading``) and, while downloading,
-# the bytes downloaded and the total if known.
-CheckProgress = Callable[[str, int | None, int | None], None]
+# Reports how far along one step is: how much is done, then the total if known. Bytes
+# while downloading or unzipping, percent while copying.
+Counted = Callable[[int, int | None], None]
+
+# Reports a stage (``downloading``, ``unzipping``, or ``reading``) and how far along it
+# is, the way ``Counted`` does. ``reading`` has no count.
+Progress = Callable[[str, int | None, int | None], None]
+
+# Reports a change check's next source: how many are checked so far, how many there are,
+# and the layer and state about to be checked.
+SourcesProgress = Callable[[int, int, str, str], None]
 
 # GDAL format name to the dataset's file suffix inside a downloaded zip.
 DATASET_SUFFIXES = {
@@ -277,12 +286,16 @@ def run_download(engine: Engine, url: str, loads: Sequence[Load]) -> None:
         with tempfile.TemporaryDirectory(
             prefix="reference-load-", dir=settings.reference_work_dir
         ) as work_dir:
-            set_stage(engine, run_ids, "downloading")
+            if loads[0].access_type == "file":
+                set_stage(engine, run_ids, "downloading")
 
-            def record_download(done: int, total: int | None) -> None:
-                record_progress(engine, run_ids, done, total)
+            def record_opening(stage_name: str, done: int | None, total: int | None) -> None:
+                record_progress(engine, run_ids, stage_name, done, total)
 
-            dataset, source_version = open_dataset(loads[0], Path(work_dir), record_download)
+            def record_copying(done: int, total: int | None) -> None:
+                record_progress(engine, sorted(pending), "copying", done, total)
+
+            dataset, source_version = open_dataset(loads[0], Path(work_dir), record_opening)
             staged: dict[tuple[str, str | None], str] = {}
             for load, run_id in runs:
                 key = (load.layer, load.source_layer)
@@ -295,7 +308,7 @@ def run_download(engine: Engine, url: str, loads: Sequence[Load]) -> None:
                         if item.clip_to_state and (item.layer, item.source_layer) == key
                     ]
                     extent = state_extent(engine, clipped_states) if clipped_states else None
-                    stage(engine, load, dataset, staged[key], extent)
+                    stage(engine, load, dataset, staged[key], extent, record_copying)
                     staged_tables.add(staged[key])
                 set_stage(engine, [run_id], "swapping")
                 rows_loaded = swap(engine, load, staged[key])
@@ -329,14 +342,14 @@ def run_download(engine: Engine, url: str, loads: Sequence[Load]) -> None:
 
 
 def open_dataset(
-    load: Load, work_dir: Path, on_progress: DownloadProgress | None = None
+    load: Load, work_dir: Path, progress: Progress | None = None
 ) -> tuple[str, str | None]:
-    """Return what ``ogr2ogr`` reads for a load, downloading it first when it's a file.
+    """Return what ``ogr2ogr`` reads for a load, downloading and unzipping it when it's a file.
 
     Args:
         load: The load being run.
-        work_dir: Temporary folder for the download.
-        on_progress: Called as the download arrives.
+        work_dir: Temporary folder to unzip into.
+        progress: Called as the download arrives, then as it's unzipped.
 
     Returns:
         The dataset path or service address, and the source version if known.
@@ -349,8 +362,20 @@ def open_dataset(
     suffix = DATASET_SUFFIXES.get(load.format)
     if suffix is None:
         raise LoadError(f"Files in format '{load.format}' can't be loaded")
-    downloaded, source_version = download(load.url, on_progress)
-    return str(find_dataset(downloaded, work_dir, [suffix])), source_version
+    downloaded, source_version = download(load.url, for_stage(progress, "downloading"))
+    dataset = find_dataset(downloaded, work_dir, [suffix], for_stage(progress, "unzipping"))
+    return str(dataset), source_version
+
+
+def for_stage(progress: Progress | None, stage_name: str) -> Counted | None:
+    """Turn a stage's progress reports into calls to ``progress`` with the stage's name."""
+    if progress is None:
+        return None
+
+    def report(done: int, total: int | None) -> None:
+        progress(stage_name, done, total)
+
+    return report
 
 
 def kept_download(url: str) -> Path:
@@ -358,7 +383,7 @@ def kept_download(url: str) -> Path:
     return DOWNLOADS_DIR / hashlib.sha256(url.encode()).hexdigest()
 
 
-def download(url: str, on_progress: DownloadProgress | None = None) -> tuple[Path, str | None]:
+def download(url: str, on_progress: Counted | None = None) -> tuple[Path, str | None]:
     """Download a file into the kept downloads folder, or reuse it if it's already there.
 
     The file is written under a temporary name and renamed when it's complete, so a
@@ -420,7 +445,9 @@ def delete_download(url: str) -> None:
     kept.with_suffix(".version").unlink(missing_ok=True)
 
 
-def find_dataset(downloaded: Path, work_dir: Path, suffixes: Sequence[str]) -> Path:
+def find_dataset(
+    downloaded: Path, work_dir: Path, suffixes: Sequence[str], on_progress: Counted | None = None
+) -> Path:
     """Return the dataset in a download, unzipping it first when it's a zip.
 
     The kept download is left as it is: a zip is unzipped into ``work_dir``, and any
@@ -430,12 +457,14 @@ def find_dataset(downloaded: Path, work_dir: Path, suffixes: Sequence[str]) -> P
         downloaded: The kept download.
         work_dir: Temporary folder to unzip or link into.
         suffixes: Dataset suffixes to look for, in order, such as ``[".gpkg"]``.
+        on_progress: Called as the zip is unzipped, with the bytes unzipped and the total.
 
     Returns:
         Path to the one dataset with the first suffix found.
 
     Raises:
-        LoadError: No dataset, or more than one, has that suffix.
+        LoadError: No dataset, or more than one, has that suffix, or the zip holds a path
+            outside the folder it's unzipped into.
     """
     if not zipfile.is_zipfile(downloaded):
         linked = work_dir / f"dataset{suffixes[0]}"
@@ -443,8 +472,7 @@ def find_dataset(downloaded: Path, work_dir: Path, suffixes: Sequence[str]) -> P
         return linked
 
     extracted = work_dir / "extracted"
-    with zipfile.ZipFile(downloaded) as archive:
-        archive.extractall(extracted)
+    unzip(downloaded, extracted, on_progress)
 
     for suffix in suffixes:
         matches = sorted(extracted.rglob(f"*{suffix}"))
@@ -456,12 +484,53 @@ def find_dataset(downloaded: Path, work_dir: Path, suffixes: Sequence[str]) -> P
     raise LoadError(f"No {' or '.join(suffixes)} dataset in the download")
 
 
+def unzip(archive_path: Path, folder: Path, on_progress: Counted | None = None) -> None:
+    """Unzip every file in a zip into ``folder``, reporting the bytes as they're written.
+
+    Args:
+        archive_path: The zip.
+        folder: Folder to unzip into. It's created if it doesn't exist.
+        on_progress: Called about once a second with the bytes unzipped and the total,
+            and once when every file is unzipped.
+
+    Raises:
+        LoadError: The zip holds a path outside ``folder``, such as ``../file.shp``.
+    """
+    folder.mkdir(parents=True, exist_ok=True)
+    inside = folder.resolve()
+    with zipfile.ZipFile(archive_path) as archive:
+        members = archive.infolist()
+        total = sum(member.file_size for member in members)
+        done = 0
+        reported_at = time.monotonic()
+        for member in members:
+            target = (folder / member.filename).resolve()
+            if not target.is_relative_to(inside):
+                raise LoadError(f"The download holds a file outside its folder: {member.filename}")
+            if member.is_dir():
+                target.mkdir(parents=True, exist_ok=True)
+                continue
+            target.parent.mkdir(parents=True, exist_ok=True)
+            with archive.open(member) as source, target.open("wb") as destination:
+                while chunk := source.read(UNZIP_CHUNK_SIZE):
+                    destination.write(chunk)
+                    done += len(chunk)
+                    if on_progress is not None and (
+                        time.monotonic() - reported_at >= PROGRESS_INTERVAL
+                    ):
+                        on_progress(done, total)
+                        reported_at = time.monotonic()
+    if on_progress is not None:
+        on_progress(done, total)
+
+
 def stage(
     engine: Engine,
     load: Load,
     dataset: str,
     staged_name: str,
     extent: tuple[float, float, float, float] | None = None,
+    on_progress: Counted | None = None,
 ) -> None:
     """Copy the source layer into ``staging.<staged_name>`` as-is, reprojected to EPSG:4326.
 
@@ -472,6 +541,7 @@ def stage(
         staged_name: Name of the staging table.
         extent: West, south, east, and north edges in EPSG:4326. Only features inside
             this rectangle are staged. ``None`` stages every feature.
+        on_progress: Called with the percent copied, as ``ogr2ogr`` reports it.
 
     Raises:
         LoadError: ``ogr2ogr`` is missing or failed.
@@ -504,10 +574,17 @@ def stage(
             *inside,
         ],
         password=url.password,
+        on_progress=on_progress,
     )
 
 
-def run_gdal(tool: str, arguments: list[str], *, password: str | None = None) -> str:
+def run_gdal(
+    tool: str,
+    arguments: list[str],
+    *,
+    password: str | None = None,
+    on_progress: Counted | None = None,
+) -> str:
     """Run a GDAL command-line tool and return what it printed.
 
     Args:
@@ -515,6 +592,8 @@ def run_gdal(tool: str, arguments: list[str], *, password: str | None = None) ->
         arguments: Everything after the tool name on the command line.
         password: PostgreSQL password, passed in the environment so it never shows in
             the process list.
+        on_progress: Called with the percent done, read from the tool's own ``-progress``
+            output (``0...10...20``) as it prints it.
 
     Returns:
         The tool's standard output.
@@ -527,12 +606,57 @@ def run_gdal(tool: str, arguments: list[str], *, password: str | None = None) ->
         raise LoadError(f"{tool} was not found. Install GDAL on this machine.")
 
     environment = {**os.environ, "PGPASSWORD": password or ""}
-    result = subprocess.run(  # noqa: S603
-        [executable, *arguments], env=environment, capture_output=True, text=True
-    )
-    if result.returncode != 0:
-        raise LoadError(f"{tool} failed: {result.stderr.strip()}")
-    return result.stdout
+    if on_progress is None:
+        result = subprocess.run(  # noqa: S603
+            [executable, *arguments], env=environment, capture_output=True, text=True
+        )
+        if result.returncode != 0:
+            raise LoadError(f"{tool} failed: {result.stderr.strip()}")
+        return result.stdout
+
+    # Errors go to a file, so a tool that prints many warnings can't fill the pipe and
+    # stop while its progress is being read.
+    with tempfile.TemporaryFile() as errors:
+        process = subprocess.Popen(  # noqa: S603
+            [executable, *arguments, "-progress"],
+            env=environment,
+            stdout=subprocess.PIPE,
+            stderr=errors,
+            bufsize=0,
+        )
+        printed = read_progress(process.stdout, on_progress) if process.stdout else ""
+        returncode = process.wait()
+        errors.seek(0)
+        error_text = errors.read().decode(errors="replace")
+    if returncode != 0:
+        raise LoadError(f"{tool} failed: {error_text.strip()}")
+    return printed
+
+
+def read_progress(output: IO[bytes], on_progress: Counted) -> str:
+    """Read a GDAL tool's ``-progress`` output as it prints, reporting each percent.
+
+    The tool prints ``0...10...20...`` up to ``100 - done.``, one number at a time.
+
+    Args:
+        output: The tool's standard output.
+        on_progress: Called with each percent and a total of 100.
+
+    Returns:
+        Everything the tool printed.
+    """
+    printed: list[str] = []
+    number = ""
+    while character := output.read(1).decode(errors="replace"):
+        printed.append(character)
+        if character.isdigit():
+            number += character
+        elif number:
+            on_progress(min(int(number), 100), 100)
+            number = ""
+    if number:
+        on_progress(min(int(number), 100), 100)
+    return "".join(printed)
 
 
 def final_geometry_type(table: Table) -> str:
@@ -682,18 +806,24 @@ def start_run(engine: Engine, layer: str, state: str) -> int:
 
 
 def set_stage(engine: Engine, run_ids: Sequence[int], stage_name: str) -> None:
-    """Record the stage the given running loads are in, for the admin page."""
-    with engine.begin() as connection:
-        connection.execute(update(LoadRun).where(LoadRun.id.in_(run_ids)).values(stage=stage_name))
-
-
-def record_progress(engine: Engine, run_ids: Sequence[int], done: int, total: int | None) -> None:
-    """Record how much of the download the given loads share has arrived."""
+    """Record the stage the given running loads are in, with no progress yet."""
     with engine.begin() as connection:
         connection.execute(
             update(LoadRun)
             .where(LoadRun.id.in_(run_ids))
-            .values(bytes_downloaded=done, bytes_total=total)
+            .values(stage=stage_name, progress_done=None, progress_total=None)
+        )
+
+
+def record_progress(
+    engine: Engine, run_ids: Sequence[int], stage_name: str, done: int | None, total: int | None
+) -> None:
+    """Record the stage the given running loads are in and how far along it is."""
+    with engine.begin() as connection:
+        connection.execute(
+            update(LoadRun)
+            .where(LoadRun.id.in_(run_ids))
+            .values(stage=stage_name, progress_done=done, progress_total=total)
         )
 
 
@@ -716,6 +846,8 @@ def fail_interrupted_runs(engine: Engine) -> int:
             .values(
                 status="failed",
                 stage=None,
+                progress_done=None,
+                progress_total=None,
                 error="The API restarted during this load.",
                 finished_at=func.now(),
             )
@@ -742,6 +874,8 @@ def finish_run(
             .values(
                 status=status,
                 stage=None,
+                progress_done=None,
+                progress_total=None,
                 source_version=source_version,
                 rows_loaded=rows_loaded,
                 error=error,
@@ -789,7 +923,7 @@ def check_link(
     url: str,
     access_type: str,
     *,
-    progress: CheckProgress | None = None,
+    progress: Progress | None = None,
 ) -> CheckedLink:
     """Open a source link with ``ogrinfo`` and match its fields to a layer's columns.
 
@@ -803,8 +937,8 @@ def check_link(
         state: Two-letter state code used to fill ``{state}`` and ``{fips}``.
         url: The link, which may hold ``{state}`` and ``{fips}``.
         access_type: ``file`` or ``service``.
-        progress: Called with the download's progress, then with ``reading`` while the
-            fields are read.
+        progress: Called as the file downloads, then as it's unzipped, then with
+            ``reading`` while the fields are read.
 
     Returns:
         The format, layers, and matched fields.
@@ -826,13 +960,14 @@ def check_link(
         if access_type == "service":
             dataset = filled_url
         else:
-
-            def report_download(done: int, total: int | None) -> None:
-                if progress is not None:
-                    progress("downloading", done, total)
-
-            downloaded, _ = download(filled_url, report_download)
-            dataset = str(find_dataset(downloaded, Path(work_dir), list(DATASET_SUFFIXES.values())))
+            downloaded, _ = download(filled_url, for_stage(progress, "downloading"))
+            found = find_dataset(
+                downloaded,
+                Path(work_dir),
+                list(DATASET_SUFFIXES.values()),
+                for_stage(progress, "unzipping"),
+            )
+            dataset = str(found)
         if progress is not None:
             progress("reading", None, None)
         info: dict[str, Any] = json.loads(run_gdal("ogrinfo", ["-json", "-so", "-al", dataset]))
@@ -908,7 +1043,7 @@ def current_version(url: str) -> tuple[str | None, str | None]:
         return None, str(error) or repr(error)
 
 
-def check_sources(engine: Engine) -> None:
+def check_sources(engine: Engine, *, progress: SourcesProgress | None = None) -> int:
     """Ask each loaded layer's source whether its file changed since the last load.
 
     Every layer and state with a successful load is checked against the source it would
@@ -918,6 +1053,11 @@ def check_sources(engine: Engine) -> None:
 
     Args:
         engine: Engine for the reference database.
+        progress: Called before each layer and state is checked, with how many are
+            checked so far, how many there are, and the layer and state.
+
+    Returns:
+        How many layers and states were checked.
     """
     query = (
         select(LoadRun)
@@ -928,13 +1068,17 @@ def check_sources(engine: Engine) -> None:
     with Session(engine) as session:
         loaded = [(run.layer, run.state, run.source_version) for run in session.scalars(query)]
 
-    versions: dict[str, tuple[str | None, str | None]] = {}
-    checks: list[dict[str, Any]] = []
+    to_check: list[tuple[str, str, str | None, str]] = []
     for layer, state, loaded_version in loaded:
         source = find_source(engine, layer, state)
-        if source is None or source.access_type == "service":
-            continue
-        url = fill(source.download_url, state)
+        if source is not None and source.access_type != "service":
+            to_check.append((layer, state, loaded_version, fill(source.download_url, state)))
+
+    versions: dict[str, tuple[str | None, str | None]] = {}
+    checks: list[dict[str, Any]] = []
+    for checked, (layer, state, loaded_version, url) in enumerate(to_check):
+        if progress is not None:
+            progress(checked, len(to_check), layer, state)
         if url not in versions:
             versions[url] = current_version(url)
         version, error = versions[url]
@@ -957,3 +1101,4 @@ def check_sources(engine: Engine) -> None:
         updates=sum(check["update_available"] for check in checks),
         errors=sum(check["error"] is not None for check in checks),
     )
+    return len(checks)

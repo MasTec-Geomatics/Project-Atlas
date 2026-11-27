@@ -19,9 +19,14 @@ import { useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
 
-import { checkSource } from "@/api/checkSource";
 import { ApiError } from "@/api/fetcher";
-import type { CheckEvent, LayerRead, SourceRead, StateRead } from "@/api/generated";
+import type {
+  CheckEvent,
+  LayerRead,
+  SourceRead,
+  SourcesCheckEvent,
+  StateRead,
+} from "@/api/generated";
 import {
   getReferenceListSourceChecksQueryKey,
   getReferenceListSourcesQueryKey,
@@ -30,14 +35,14 @@ import {
   useReferenceListSourceChecks,
   useReferenceListSources,
   useReferenceListStates,
-  useReferenceRunSourceChecks,
   useReferenceUpdateSource,
 } from "@/api/generated";
+import { checkSource, runSourceChecks } from "@/api/streams";
 import { DateSettingsMenu } from "@/dates/DateSettingsMenu";
 import { useDateSettings } from "@/dates/dateSettings";
 import { formatDate } from "@/dates/formatDate";
 
-import { downloadPercent, downloadText } from "./formatBytes";
+import { percentDone, stageText } from "./progressText";
 import classes from "./ReferenceSourcesPage.module.css";
 
 /** The State option for a source that covers every state. */
@@ -118,16 +123,22 @@ function errorMessage(error: unknown): string {
 }
 
 /**
- * What a running link check is doing: opening the link, downloading, or reading fields.
+ * What a running link check is doing: opening the link, downloading, unzipping, or
+ * reading fields.
  */
 function checkText(event: CheckEvent | null): string {
-  if (event?.stage === "downloading") {
-    return downloadText(event.bytes_downloaded ?? null, event.bytes_total ?? null);
+  return stageText(event?.stage, event?.progress_done, event?.progress_total) ?? "Opening the link";
+}
+
+/**
+ * What a running Check for updates is doing, such as `Checking Wetlands for TX (3 of 12)`.
+ */
+function updatesText(event: SourcesCheckEvent | null, layerTitle: (name: string) => string) {
+  if (event === null || event.layer === undefined || event.layer === null) {
+    return "Starting the check";
   }
-  if (event?.stage === "reading") {
-    return "Reading fields";
-  }
-  return "Opening the link";
+  const position = (event.checked ?? 0) + 1;
+  return `Checking ${layerTitle(event.layer)} for ${event.state} (${position} of ${event.total})`;
 }
 
 /**
@@ -173,8 +184,9 @@ interface SourceFormProps {
  *
  * Check link opens the link and fills in the format, the dataset layer, and the field
  * for each column it could match. While it runs, a bar shows the download's progress,
- * then reading the fields. The load uses the file Check link downloaded. Save stays off
- * until the link is checked, and again after the layer, state, link, or type changes.
+ * then the unzip's, then reading the fields. The load uses the file Check link
+ * downloaded. Save stays off until the link is checked, and again after the layer,
+ * state, link, or type changes.
  */
 function SourceForm({ editing, layers, states, onSaved }: SourceFormProps) {
   const [form, setForm] = useState<FormValues>(editing ? formFromSource(editing) : EMPTY_FORM);
@@ -218,6 +230,7 @@ function SourceForm({ editing, layers, states, onSaved }: SourceFormProps) {
     setChecking(true);
     setCheckProgress(null);
     setCheckError(null);
+    let finished = false;
     try {
       await checkSource(
         {
@@ -228,6 +241,7 @@ function SourceForm({ editing, layers, states, onSaved }: SourceFormProps) {
         },
         (event) => {
           if (event.stage === "done" && event.result) {
+            finished = true;
             const result = event.result;
             setForm((current) => ({
               ...current,
@@ -237,6 +251,7 @@ function SourceForm({ editing, layers, states, onSaved }: SourceFormProps) {
               columns: result.field_mapping,
             }));
           } else if (event.stage === "failed") {
+            finished = true;
             setCheckError(event.error ?? "The link couldn't be checked.");
           } else {
             setCheckProgress(event);
@@ -244,6 +259,9 @@ function SourceForm({ editing, layers, states, onSaved }: SourceFormProps) {
         },
         abort.signal,
       );
+      if (!finished) {
+        setCheckError("The check stopped before it finished.");
+      }
     } catch (error) {
       if (abort.signal.aborted) return;
       setCheckError(errorMessage(error));
@@ -369,14 +387,7 @@ function SourceForm({ editing, layers, states, onSaved }: SourceFormProps) {
       {checking && (
         <Stack gap={4}>
           <Progress
-            value={
-              checkProgress?.stage === "downloading"
-                ? (downloadPercent(
-                    checkProgress.bytes_downloaded ?? null,
-                    checkProgress.bytes_total ?? null,
-                  ) ?? 100)
-                : 100
-            }
+            value={percentDone(checkProgress?.progress_done, checkProgress?.progress_total) ?? 100}
             striped
             animated
             aria-label="Check link progress"
@@ -491,8 +502,10 @@ function groupSources(sources: SourceRead[], layers: LayerRead[]) {
  * Admin page for the reference database's sources: where each layer downloads from,
  * for one state or for every state.
  *
- * Sources show in one table per group, with the same column widths in every table. Add
- * source and Edit open the source form in a panel on the right.
+ * Check for updates checks every loaded source for a newer file, showing each source as
+ * it's checked, then lists what it found. Sources show in one table per group, with the
+ * same column widths in every table. Add source and Edit open the source form in a panel
+ * on the right.
  */
 export function ReferenceSourcesPage() {
   const queryClient = useQueryClient();
@@ -503,12 +516,14 @@ export function ReferenceSourcesPage() {
   const layers = useReferenceListLayers();
   const states = useReferenceListStates();
   const checks = useReferenceListSourceChecks();
-  const runChecks = useReferenceRunSourceChecks({
-    mutation: {
-      onSuccess: () =>
-        queryClient.invalidateQueries({ queryKey: getReferenceListSourceChecksQueryKey() }),
-    },
-  });
+
+  // Check for updates: whether it's running, its newest line, and why it couldn't finish.
+  // Leaving the page stops reading the answer; the check itself still finishes.
+  const [checkingUpdates, setCheckingUpdates] = useState(false);
+  const [updatesProgress, setUpdatesProgress] = useState<SourcesCheckEvent | null>(null);
+  const [updatesError, setUpdatesError] = useState<string | null>(null);
+  const updatesAbort = useRef<AbortController | null>(null);
+  useEffect(() => () => updatesAbort.current?.abort(), []);
 
   const allSources = sources.data?.data ?? [];
   const allLayers = layers.data?.data ?? [];
@@ -517,6 +532,35 @@ export function ReferenceSourcesPage() {
   const dateSettings = useDateSettings();
   const layerTitle = (name: string) =>
     allLayers.find((layer) => layer.name === name)?.title ?? name;
+
+  async function checkForUpdates() {
+    const abort = new AbortController();
+    updatesAbort.current = abort;
+    setCheckingUpdates(true);
+    setUpdatesProgress(null);
+    setUpdatesError(null);
+    let finished = false;
+    try {
+      await runSourceChecks((event) => {
+        if (event.stage === "checking") {
+          setUpdatesProgress(event);
+        } else {
+          finished = true;
+          if (event.stage === "failed") {
+            setUpdatesError(event.error ?? "The check couldn't finish.");
+          }
+        }
+      }, abort.signal);
+      if (!finished) {
+        setUpdatesError("The check stopped before it finished.");
+      }
+    } catch (error) {
+      if (abort.signal.aborted) return;
+      setUpdatesError(errorMessage(error));
+    }
+    setCheckingUpdates(false);
+    await queryClient.invalidateQueries({ queryKey: getReferenceListSourceChecksQueryKey() });
+  }
 
   async function saved() {
     setEditing(null);
@@ -548,12 +592,23 @@ export function ReferenceSourcesPage() {
             <Title order={3}>Updates</Title>
             <Button
               variant="default"
-              onClick={() => runChecks.mutate()}
-              loading={runChecks.isPending}
+              onClick={() => void checkForUpdates()}
+              disabled={checkingUpdates}
             >
               Check for updates
             </Button>
           </Group>
+          {checkingUpdates && (
+            <Stack gap={4}>
+              <Progress
+                value={percentDone(updatesProgress?.checked, updatesProgress?.total) ?? 100}
+                striped
+                animated
+                aria-label="Check for updates progress"
+              />
+              <Text size="sm">{updatesText(updatesProgress, layerTitle)}</Text>
+            </Stack>
+          )}
           {lastCheck && (
             <Text size="sm">
               {lastCheck.checked_at === null
@@ -561,9 +616,9 @@ export function ReferenceSourcesPage() {
                 : `Last checked ${formatDate(lastCheck.checked_at, dateSettings)}`}
             </Text>
           )}
-          {runChecks.isError && (
-            <Alert color="var(--color-rust)" title="The check didn't run">
-              {errorMessage(runChecks.error)}
+          {updatesError !== null && (
+            <Alert color="var(--color-rust)" title="The check didn't finish">
+              {updatesError}
             </Alert>
           )}
           {lastCheck?.checked_at && lastCheck.updates.length === 0 && (

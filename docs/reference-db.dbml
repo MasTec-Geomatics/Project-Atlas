@@ -42,6 +42,9 @@ Table public.load_runs {
   layer text [not null, note: 'e.g. hydro.wetlands']
   state text [not null, note: 'e.g. TX']
   status text [not null, note: "check: 'running' | 'succeeded' | 'failed'"]
+  stage text [note: "while running, check: 'downloading' | 'unzipping' | 'copying' | 'swapping'"]
+  progress_done bigint [note: 'how far along the stage is: bytes while downloading or unzipping, percent while copying']
+  progress_total bigint [note: "the stage's total, same units; empty while swapping, or downloading when the source doesn't say the size"]
   source_version text [note: 'Last-Modified / ETag / release date from source']
   rows_loaded integer
   error text

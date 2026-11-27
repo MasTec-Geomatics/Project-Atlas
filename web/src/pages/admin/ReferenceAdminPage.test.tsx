@@ -23,8 +23,8 @@ const SUCCEEDED: LoadRead = {
   state: "TX",
   status: "succeeded",
   stage: null,
-  bytes_downloaded: null,
-  bytes_total: null,
+  progress_done: null,
+  progress_total: null,
   rows_loaded: 2233909,
   source_version: "2026-10-01",
   error: null,
@@ -37,8 +37,8 @@ const FAILED: LoadRead = {
   state: "TX",
   status: "failed",
   stage: null,
-  bytes_downloaded: null,
-  bytes_total: null,
+  progress_done: null,
+  progress_total: null,
   rows_loaded: null,
   source_version: null,
   error: "Download failed with status 404",
@@ -494,7 +494,7 @@ describe("/admin/reference load table", () => {
   it("shows how much of a running load has downloaded", async () => {
     stubApi({
       loads: [
-        { ...RUNNING, stage: "downloading", bytes_downloaded: 356515840, bytes_total: 1288490188 },
+        { ...RUNNING, stage: "downloading", progress_done: 356515840, progress_total: 1288490188 },
       ],
     });
 
@@ -506,7 +506,7 @@ describe("/admin/reference load table", () => {
   });
 
   it("shows a running load's download when its size isn't known", async () => {
-    stubApi({ loads: [{ ...RUNNING, stage: "downloading", bytes_downloaded: 5242880 }] });
+    stubApi({ loads: [{ ...RUNNING, stage: "downloading", progress_done: 5242880 }] });
 
     renderRoute(PAGE_URL);
 
@@ -521,6 +521,30 @@ describe("/admin/reference load table", () => {
 
     const cell = await screen.findByRole("cell", { name: /Wetlands for TX/ });
     expect(within(cell).getByText("Copying data")).toBeInTheDocument();
+  });
+
+  it("shows how much of a running load has unzipped", async () => {
+    stubApi({
+      loads: [
+        { ...RUNNING, stage: "unzipping", progress_done: 356515840, progress_total: 1288490188 },
+      ],
+    });
+
+    renderRoute(PAGE_URL);
+
+    const cell = await screen.findByRole("cell", { name: /Wetlands for TX/ });
+    expect(within(cell).getByText("Unzipping: 340.0 MB of 1.2 GB")).toBeInTheDocument();
+    expect(within(cell).getByRole("progressbar")).toHaveAttribute("aria-valuenow", "28");
+  });
+
+  it("shows how much of a running load has been copied", async () => {
+    stubApi({ loads: [{ ...RUNNING, stage: "copying", progress_done: 40, progress_total: 100 }] });
+
+    renderRoute(PAGE_URL);
+
+    const cell = await screen.findByRole("cell", { name: /Wetlands for TX/ });
+    expect(within(cell).getByText("Copying data: 40%")).toBeInTheDocument();
+    expect(within(cell).getByRole("progressbar")).toHaveAttribute("aria-valuenow", "40");
   });
 
   it("shows when a running load is swapping data", async () => {

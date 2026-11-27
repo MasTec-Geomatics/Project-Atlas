@@ -6,14 +6,16 @@
   read the last load of each layer and state.
 - ``/sources``: list, add, and edit sources.
 - ``/sources/check``: open a link and match its fields to a layer, before saving. The
-  answer streams back as the link downloads, so the page can show the download's progress.
+  answer streams back as the link downloads and unzips, so the page can show how far
+  along it is.
 - ``/sources/checks``: check every loaded layer's source for a newer file, the **Check for
-  updates** button and the weekly scheduled job, and read what the last check found.
+  updates** button and the weekly scheduled job, and read what the last check found. The
+  check streams back each source as it's checked, so the page can show how far along it is.
 """
 
 import queue
 import threading
-from collections.abc import Iterator, Sequence
+from collections.abc import Callable, Iterator, Sequence
 from datetime import datetime
 from typing import Annotated, Any, Literal
 
@@ -96,9 +98,11 @@ class LoadRead(BaseModel):
         layer: Layer name, such as ``hydro.wetlands``.
         state: Two-letter state code, such as ``TX``.
         status: ``running``, ``succeeded``, or ``failed``.
-        stage: While running: ``downloading``, ``copying``, or ``swapping``.
-        bytes_downloaded: How much of the download has arrived.
-        bytes_total: The download's size, when the source says.
+        stage: While running: ``downloading``, ``unzipping``, ``copying``, or ``swapping``.
+        progress_done: How far along the stage is: bytes while downloading or unzipping,
+            percent while copying.
+        progress_total: The stage's total, in the same units. Empty while downloading
+            when the source doesn't say the file's size, and while swapping.
         rows_loaded: Rows in the layer for the state after the load, once it succeeded.
         source_version: The source's version or last-updated date, once it succeeded.
         error: Why the load failed.
@@ -112,8 +116,8 @@ class LoadRead(BaseModel):
     state: str
     status: str
     stage: str | None
-    bytes_downloaded: int | None
-    bytes_total: int | None
+    progress_done: int | None
+    progress_total: int | None
     rows_loaded: int | None
     source_version: str | None
     error: str | None
@@ -277,22 +281,46 @@ class CheckResult(BaseModel):
 class CheckEvent(BaseModel):
     """One line of a link check's streamed answer.
 
-    The lines come in order: ``downloading`` (repeated as the file arrives, for a file
-    link), ``reading`` while the fields are read, then ``done`` with the result or
-    ``failed`` with the reason.
+    The lines come in order: ``downloading`` (repeated as the file arrives) and
+    ``unzipping`` (repeated as a zip is unzipped) for a file link, ``reading`` while the
+    fields are read, then ``done`` with the result or ``failed`` with the reason.
 
     Attributes:
-        stage: ``downloading``, ``reading``, ``done``, or ``failed``.
-        bytes_downloaded: How much of the file has arrived, while downloading.
-        bytes_total: The file's size, while downloading, when the source says.
+        stage: ``downloading``, ``unzipping``, ``reading``, ``done``, or ``failed``.
+        progress_done: Bytes downloaded or unzipped so far.
+        progress_total: The total bytes to download or unzip. Empty while downloading
+            when the source doesn't say the file's size.
         result: What the link holds, when done.
         error: Why the link couldn't be checked, when failed.
     """
 
-    stage: Literal["downloading", "reading", "done", "failed"]
-    bytes_downloaded: int | None = None
-    bytes_total: int | None = None
+    stage: Literal["downloading", "unzipping", "reading", "done", "failed"]
+    progress_done: int | None = None
+    progress_total: int | None = None
     result: CheckResult | None = None
+    error: str | None = None
+
+
+class SourcesCheckEvent(BaseModel):
+    """One line of a change check's streamed answer.
+
+    The lines come in order: ``checking`` before each loaded layer and state is checked,
+    then ``done`` with how many were checked, or ``failed`` with the reason.
+
+    Attributes:
+        stage: ``checking``, ``done``, or ``failed``.
+        checked: How many layers and states are checked so far.
+        total: How many layers and states there are to check.
+        layer: The layer being checked, while checking.
+        state: The state being checked, while checking.
+        error: Why the check couldn't finish, when failed.
+    """
+
+    stage: Literal["checking", "done", "failed"]
+    checked: int | None = None
+    total: int | None = None
+    layer: str | None = None
+    state: str | None = None
     error: str | None = None
 
 
@@ -544,67 +572,47 @@ def check_result(checked: CheckedLink) -> CheckResult:
     )
 
 
-def check_events(engine: Engine, body: CheckRequest) -> Iterator[str]:
-    """Check a link and yield its progress and answer, one JSON line at a time.
+def stream_events(run: Callable[[Callable[[BaseModel], None]], None]) -> StreamingResponse:
+    """Run a check in its own thread and stream each event it sends as one JSON line.
 
-    The check runs in its own thread, so each line is sent as soon as it happens instead
-    of when the check ends.
+    Each line is sent as soon as the check sends it, instead of when the check ends.
 
     Args:
-        engine: Engine for the reference database.
-        body: The link to check.
+        run: The check. It sends each event by calling the function it's given.
 
-    Yields:
-        One JSON line per event: download progress, reading, then done or failed.
+    Returns:
+        The streamed answer, as JSON lines (``application/x-ndjson``).
     """
-    events: queue.Queue[CheckEvent | None] = queue.Queue()
+    events: queue.Queue[BaseModel | None] = queue.Queue()
 
-    def report(stage: str, done: int | None, total: int | None) -> None:
-        if stage == "downloading":
-            events.put(CheckEvent(stage="downloading", bytes_downloaded=done, bytes_total=total))
-        else:
-            events.put(CheckEvent(stage="reading"))
-
-    def run() -> None:
+    def worker() -> None:
         try:
-            checked = check_link(
-                engine,
-                body.layer,
-                body.state,
-                body.download_url,
-                body.access_type,
-                progress=report,
-            )
-            events.put(CheckEvent(stage="done", result=check_result(checked)))
-        except (LoadError, httpx.HTTPError, OSError) as error:
-            events.put(CheckEvent(stage="failed", error=str(error) or repr(error)))
+            run(events.put)
         finally:
             events.put(None)
 
-    threading.Thread(target=run, daemon=True).start()
-    while (event := events.get()) is not None:
-        yield event.model_dump_json(exclude_unset=True) + "\n"
+    def lines() -> Iterator[str]:
+        while (event := events.get()) is not None:
+            yield event.model_dump_json(exclude_unset=True) + "\n"
+
+    threading.Thread(target=worker, daemon=True).start()
+    return StreamingResponse(lines(), media_type="application/x-ndjson")
 
 
-# The Check link answer, for the OpenAPI schema: JSON lines, one CheckEvent per line.
-CHECK_RESPONSES: dict[int | str, dict[str, Any]] = {
-    200: {"model": CheckEvent, "content": {"application/x-ndjson": {}}},
-}
+def streamed(model: type[BaseModel]) -> dict[int | str, dict[str, Any]]:
+    """The OpenAPI answer for a streamed endpoint: JSON lines, one ``model`` per line."""
+    return {200: {"model": model, "content": {"application/x-ndjson": {}}}}
 
 
-@router.post(
-    "/sources/check",
-    response_class=StreamingResponse,
-    responses=CHECK_RESPONSES,
-)
+@router.post("/sources/check", response_class=StreamingResponse, responses=streamed(CheckEvent))
 def check_source(body: CheckRequest, engine: ReferenceEngine) -> StreamingResponse:
     """Open a link and match its fields to the layer's columns, without saving anything.
 
     A file link is downloaded into the kept downloads folder, where the load finds it, so
     the file is downloaded only once. The answer streams back one JSON line at a time: the
-    download's progress, then reading, then the result or why it failed. Fields are
-    matched to the layer's current source first, then by the same name as the column,
-    ignoring case.
+    download's progress, then the unzip's, then reading, then the result or why it
+    failed. Fields are matched to the layer's current source first, then by the same name
+    as the column, ignoring case.
 
     Args:
         body: The link to check.
@@ -617,20 +625,66 @@ def check_source(body: CheckRequest, engine: ReferenceEngine) -> StreamingRespon
         HTTPException: 422 for an unknown layer or state code, before anything streams.
     """
     check_layer_and_state(body.layer, body.state)
-    return StreamingResponse(check_events(engine, body), media_type="application/x-ndjson")
+
+    def run(send: Callable[[BaseModel], None]) -> None:
+        def report(stage: str, done: int | None, total: int | None) -> None:
+            if stage == "downloading":
+                send(CheckEvent(stage="downloading", progress_done=done, progress_total=total))
+            elif stage == "unzipping":
+                send(CheckEvent(stage="unzipping", progress_done=done, progress_total=total))
+            else:
+                send(CheckEvent(stage="reading"))
+
+        try:
+            checked = check_link(
+                engine,
+                body.layer,
+                body.state,
+                body.download_url,
+                body.access_type,
+                progress=report,
+            )
+            send(CheckEvent(stage="done", result=check_result(checked)))
+        except (LoadError, httpx.HTTPError, OSError, SQLAlchemyError) as error:
+            send(CheckEvent(stage="failed", error=str(error) or repr(error)))
+
+    return stream_events(run)
 
 
-@router.post("/sources/checks", status_code=status.HTTP_204_NO_CONTENT)
-def run_source_checks(engine: ReferenceEngine) -> None:
+@router.post(
+    "/sources/checks", response_class=StreamingResponse, responses=streamed(SourcesCheckEvent)
+)
+def run_source_checks(engine: ReferenceEngine) -> StreamingResponse:
     """Check every loaded layer's source for a newer file, without downloading it.
 
     The admin page's **Check for updates** button and the weekly scheduled job call this.
-    Each answer is recorded in ``public.source_checks``.
+    Each answer is recorded in ``public.source_checks``. The answer streams back one JSON
+    line at a time: each layer and state as it's checked, then how many were checked, or
+    why the check couldn't finish.
 
     Args:
         engine: Engine for the reference database.
+
+    Returns:
+        The streamed answer, as JSON lines (``application/x-ndjson``).
     """
-    check_sources(engine)
+
+    def run(send: Callable[[BaseModel], None]) -> None:
+        def report(checked: int, total: int, layer: str, state: str) -> None:
+            send(
+                SourcesCheckEvent(
+                    stage="checking", checked=checked, total=total, layer=layer, state=state
+                )
+            )
+
+        try:
+            count = check_sources(engine, progress=report)
+            send(SourcesCheckEvent(stage="done", checked=count, total=count))
+        except (httpx.HTTPError, OSError, SQLAlchemyError) as error:
+            log.exception("source_checks_failed")
+            send(SourcesCheckEvent(stage="failed", error=str(error) or repr(error)))
+
+    return stream_events(run)
 
 
 @router.get("/sources/checks")

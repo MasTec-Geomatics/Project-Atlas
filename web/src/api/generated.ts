@@ -30,6 +30,7 @@ export type CheckEventStage = typeof CheckEventStage[keyof typeof CheckEventStag
 
 export const CheckEventStage = {
   downloading: 'downloading',
+  unzipping: 'unzipping',
   reading: 'reading',
   done: 'done',
   failed: 'failed',
@@ -69,21 +70,22 @@ export interface CheckResult {
 /**
  * One line of a link check's streamed answer.
  *
- * The lines come in order: ``downloading`` (repeated as the file arrives, for a file
- * link), ``reading`` while the fields are read, then ``done`` with the result or
- * ``failed`` with the reason.
+ * The lines come in order: ``downloading`` (repeated as the file arrives) and
+ * ``unzipping`` (repeated as a zip is unzipped) for a file link, ``reading`` while the
+ * fields are read, then ``done`` with the result or ``failed`` with the reason.
  *
  * Attributes:
- *     stage: ``downloading``, ``reading``, ``done``, or ``failed``.
- *     bytes_downloaded: How much of the file has arrived, while downloading.
- *     bytes_total: The file's size, while downloading, when the source says.
+ *     stage: ``downloading``, ``unzipping``, ``reading``, ``done``, or ``failed``.
+ *     progress_done: Bytes downloaded or unzipped so far.
+ *     progress_total: The total bytes to download or unzip. Empty while downloading
+ *         when the source doesn't say the file's size.
  *     result: What the link holds, when done.
  *     error: Why the link couldn't be checked, when failed.
  */
 export interface CheckEvent {
   stage: CheckEventStage;
-  bytes_downloaded?: number | null;
-  bytes_total?: number | null;
+  progress_done?: number | null;
+  progress_total?: number | null;
   result?: CheckResult | null;
   error?: string | null;
 }
@@ -142,9 +144,11 @@ export interface LayerRead {
  *     layer: Layer name, such as ``hydro.wetlands``.
  *     state: Two-letter state code, such as ``TX``.
  *     status: ``running``, ``succeeded``, or ``failed``.
- *     stage: While running: ``downloading``, ``copying``, or ``swapping``.
- *     bytes_downloaded: How much of the download has arrived.
- *     bytes_total: The download's size, when the source says.
+ *     stage: While running: ``downloading``, ``unzipping``, ``copying``, or ``swapping``.
+ *     progress_done: How far along the stage is: bytes while downloading or unzipping,
+ *         percent while copying.
+ *     progress_total: The stage's total, in the same units. Empty while downloading
+ *         when the source doesn't say the file's size, and while swapping.
  *     rows_loaded: Rows in the layer for the state after the load, once it succeeded.
  *     source_version: The source's version or last-updated date, once it succeeded.
  *     error: Why the load failed.
@@ -156,8 +160,8 @@ export interface LoadRead {
   state: string;
   status: string;
   stage: string | null;
-  bytes_downloaded: number | null;
-  bytes_total: number | null;
+  progress_done: number | null;
+  progress_total: number | null;
   rows_loaded: number | null;
   source_version: string | null;
   error: string | null;
@@ -325,6 +329,38 @@ export interface SourceUpdate {
   license?: string | null;
   attribution?: string | null;
   is_enabled?: boolean | null;
+}
+
+export type SourcesCheckEventStage = typeof SourcesCheckEventStage[keyof typeof SourcesCheckEventStage];
+
+
+export const SourcesCheckEventStage = {
+  checking: 'checking',
+  done: 'done',
+  failed: 'failed',
+} as const;
+
+/**
+ * One line of a change check's streamed answer.
+ *
+ * The lines come in order: ``checking`` before each loaded layer and state is checked,
+ * then ``done`` with how many were checked, or ``failed`` with the reason.
+ *
+ * Attributes:
+ *     stage: ``checking``, ``done``, or ``failed``.
+ *     checked: How many layers and states are checked so far.
+ *     total: How many layers and states there are to check.
+ *     layer: The layer being checked, while checking.
+ *     state: The state being checked, while checking.
+ *     error: Why the check couldn't finish, when failed.
+ */
+export interface SourcesCheckEvent {
+  stage: SourcesCheckEventStage;
+  checked?: number | null;
+  total?: number | null;
+  layer?: string | null;
+  state?: string | null;
+  error?: string | null;
 }
 
 /**
@@ -1501,9 +1537,9 @@ export const getReferenceCheckSourceUrl = () => {
  *
  * A file link is downloaded into the kept downloads folder, where the load finds it, so
  * the file is downloaded only once. The answer streams back one JSON line at a time: the
- * download's progress, then reading, then the result or why it failed. Fields are
- * matched to the layer's current source first, then by the same name as the column,
- * ignoring case.
+ * download's progress, then the unzip's, then reading, then the result or why it
+ * failed. Fields are matched to the layer's current source first, then by the same name
+ * as the column, ignoring case.
  *
  * Args:
  *     body: The link to check.
@@ -1570,9 +1606,9 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
  *
  * A file link is downloaded into the kept downloads folder, where the load finds it, so
  * the file is downloaded only once. The answer streams back one JSON line at a time: the
- * download's progress, then reading, then the result or why it failed. Fields are
- * matched to the layer's current source first, then by the same name as the column,
- * ignoring case.
+ * download's progress, then the unzip's, then reading, then the result or why it
+ * failed. Fields are matched to the layer's current source first, then by the same name
+ * as the column, ignoring case.
  *
  * Args:
  *     body: The link to check.
@@ -1757,12 +1793,12 @@ export function useReferenceListSourceChecks<TData = Awaited<ReturnType<typeof r
 
 
 
-export type referenceRunSourceChecksResponse204 = {
-  data: void
-  status: 204
+export type referenceRunSourceChecksResponse200 = {
+  data: SourcesCheckEvent
+  status: 200
 }
 
-export type referenceRunSourceChecksResponseSuccess = (referenceRunSourceChecksResponse204) & {
+export type referenceRunSourceChecksResponseSuccess = (referenceRunSourceChecksResponse200) & {
   headers: Headers;
 };
 ;
@@ -1781,10 +1817,15 @@ export const getReferenceRunSourceChecksUrl = () => {
  * Check every loaded layer's source for a newer file, without downloading it.
  *
  * The admin page's **Check for updates** button and the weekly scheduled job call this.
- * Each answer is recorded in ``public.source_checks``.
+ * Each answer is recorded in ``public.source_checks``. The answer streams back one JSON
+ * line at a time: each layer and state as it's checked, then how many were checked, or
+ * why the check couldn't finish.
  *
  * Args:
  *     engine: Engine for the reference database.
+ *
+ * Returns:
+ *     The streamed answer, as JSON lines (``application/x-ndjson``).
  * @summary Run Source Checks
  */
 export const referenceRunSourceChecks = async ( options?: Parameters<typeof customFetch>[1]): Promise<referenceRunSourceChecksResponse> => {
@@ -1840,10 +1881,15 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
  * Check every loaded layer's source for a newer file, without downloading it.
  *
  * The admin page's **Check for updates** button and the weekly scheduled job call this.
- * Each answer is recorded in ``public.source_checks``.
+ * Each answer is recorded in ``public.source_checks``. The answer streams back one JSON
+ * line at a time: each layer and state as it's checked, then how many were checked, or
+ * why the check couldn't finish.
  *
  * Args:
  *     engine: Engine for the reference database.
+ *
+ * Returns:
+ *     The streamed answer, as JSON lines (``application/x-ndjson``).
  * @summary Run Source Checks
  */
 export const useReferenceRunSourceChecks = <TError = ErrorType<unknown>,
