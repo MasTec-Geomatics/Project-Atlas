@@ -7,6 +7,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 from src.core.database import ReferenceBase
 
 SCHEMA = "cultural"
+SCHEMA_TITLE = "Cultural resources"
 
 
 # noinspection SpellCheckingInspection
@@ -16,7 +17,10 @@ class NationalRegisterProperty(ReferenceBase):
     __tablename__ = "nrhp"
     __table_args__ = (
         Index("nrhp_geom_idx", "geom", postgresql_using="gist"),
-        {"schema": SCHEMA},
+        {
+            "schema": SCHEMA,
+            "info": {"title": "National Register of Historic Places", "group": SCHEMA_TITLE},
+        },
     )
 
     id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
@@ -32,7 +36,7 @@ class Cemetery(ReferenceBase):
     __tablename__ = "cemeteries"
     __table_args__ = (
         Index("cemeteries_geom_idx", "geom", postgresql_using="gist"),
-        {"schema": SCHEMA},
+        {"schema": SCHEMA, "info": {"title": "Cemeteries", "group": SCHEMA_TITLE}},
     )
 
     id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
@@ -48,7 +52,7 @@ class Marker(ReferenceBase):
     __tablename__ = "markers"
     __table_args__ = (
         Index("markers_geom_idx", "geom", postgresql_using="gist"),
-        {"schema": SCHEMA},
+        {"schema": SCHEMA, "info": {"title": "Historical markers", "group": SCHEMA_TITLE}},
     )
 
     id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)

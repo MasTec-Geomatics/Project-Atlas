@@ -1,0 +1,96 @@
+/* Page header: dark-navy bar with white text, the same as the load page. */
+.header {
+  padding: var(--space-6);
+  background-color: var(--color-dark-navy);
+  color: var(--color-white);
+}
+
+.content {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+  padding: var(--space-6);
+}
+
+.group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+/* The brand's citron accent bar under the Sources heading. */
+.accent::after {
+  content: "";
+  display: block;
+  width: 3rem;
+  height: 0.25rem;
+  margin-top: var(--space-2);
+  background-color: var(--color-citron);
+}
+
+/*
+ * Every table uses the same column widths, so the columns line up from one table to
+ * the next. The table's width is the total of its columns, so a long link is cut short
+ * instead of widening its column.
+ */
+.table {
+  --layer-width: 14rem;
+  --state-width: 7rem;
+  --link-width: 28rem;
+  --format-width: 10rem;
+  --enabled-width: 6rem;
+  --edit-width: 6rem;
+
+  table-layout: fixed;
+  width: calc(
+    var(--layer-width) + var(--state-width) + var(--link-width) + var(--format-width) +
+      var(--enabled-width) + var(--edit-width)
+  );
+  background-color: var(--color-white);
+}
+
+.layerColumn {
+  width: var(--layer-width);
+}
+
+.stateColumn {
+  width: var(--state-width);
+}
+
+.linkColumn {
+  width: var(--link-width);
+}
+
+.formatColumn {
+  width: var(--format-width);
+}
+
+.enabledColumn {
+  width: var(--enabled-width);
+}
+
+.editColumn {
+  width: var(--edit-width);
+}
+
+.headRow th {
+  background-color: var(--color-lt-gray);
+}
+
+/* Long links are cut short with an ellipsis; the full link shows on hover. */
+.link {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The updates table is as wide as its contents. */
+.updates {
+  width: auto;
+  background-color: var(--color-white);
+}
+
+/* The form's column-to-field table fills the panel. */
+.fields {
+  width: 100%;
+}

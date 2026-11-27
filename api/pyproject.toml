@@ -10,11 +10,11 @@ classifiers = [
 dependencies = [
     "alembic>=1.20.1",
     "fastapi-swagger-ui-theme>=0.1.0",
-    "fastapi[standard]==0.164.0",
+    "fastapi[standard]==0.165.0",
     "geoalchemy2==0.21.0",
     "httpx>=0.28.1",
     "psycopg==3.3.9",
-    "pydantic==2.14.3",
+    "pydantic==2.14.4",
     "python-dotenv>=1.2.4",
     "sqlalchemy==2.1.9",
     "structlog>=26.1.0",
@@ -78,4 +78,3 @@ warn_required_dynamic_aliases = true
 testpaths = ["tests"]
 pythonpath = ["."]
 addopts = "-ra --strict-markers --strict-config"
-

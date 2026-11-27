@@ -7,6 +7,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 from src.core.database import ReferenceBase
 
 SCHEMA = "boundaries"
+SCHEMA_TITLE = "Boundaries"
 
 
 class State(ReferenceBase):
@@ -15,7 +16,7 @@ class State(ReferenceBase):
     __tablename__ = "states"
     __table_args__ = (
         Index("states_geom_idx", "geom", postgresql_using="gist"),
-        {"schema": SCHEMA},
+        {"schema": SCHEMA, "info": {"title": "States", "group": SCHEMA_TITLE}},
     )
 
     id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
@@ -32,7 +33,7 @@ class County(ReferenceBase):
     __tablename__ = "counties"
     __table_args__ = (
         Index("counties_geom_idx", "geom", postgresql_using="gist"),
-        {"schema": SCHEMA},
+        {"schema": SCHEMA, "info": {"title": "Counties", "group": SCHEMA_TITLE}},
     )
 
     id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
@@ -54,7 +55,7 @@ class Place(ReferenceBase):
     __tablename__ = "places"
     __table_args__ = (
         Index("places_geom_idx", "geom", postgresql_using="gist"),
-        {"schema": SCHEMA},
+        {"schema": SCHEMA, "info": {"title": "Cities and towns", "group": SCHEMA_TITLE}},
     )
 
     id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)

@@ -41,6 +41,8 @@ export default defineConfig({
   test: {
     environment: "jsdom",
     setupFiles: ["./src/test/setup.ts"],
+    // Every test runs in Eastern time, so "Local" times are the same on every machine.
+    env: { TZ: "America/New_York" },
   },
   server: {
     proxy: {

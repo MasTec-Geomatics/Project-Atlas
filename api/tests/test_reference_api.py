@@ -218,12 +218,26 @@ def test_layers() -> None:
     response = client.get(LAYERS_URL)
 
     assert response.status_code == 200
-    layers = response.json()
-    assert "boundaries.states" in layers
-    assert "hydro.wetlands" in layers
-    assert "public.sources" not in layers
-    assert "public.load_runs" not in layers
-    assert layers == sorted(layers)
+    names = [layer["name"] for layer in response.json()]
+    assert "boundaries.states" in names
+    assert "hydro.wetlands" in names
+    assert "public.sources" not in names
+    assert "public.load_runs" not in names
+    assert names == sorted(names)
+
+
+def test_layers_have_readable_names() -> None:
+    """Each layer comes with a readable name and the readable name of its group."""
+    layers = client.get(LAYERS_URL).json()
+
+    assert {"name": "hydro.wetlands", "title": "Wetlands", "group": "Water"} in layers
+
+
+def test_every_layer_has_a_title_and_group() -> None:
+    """No layer is missing its readable name or group."""
+    layers = client.get(LAYERS_URL).json()
+
+    assert [layer["name"] for layer in layers if not layer["title"] or not layer["group"]] == []
 
 
 def test_last_load_of_each_layer_and_state(api_engine: Engine) -> None:
@@ -256,3 +270,36 @@ def test_failed_load_has_its_error(api_engine: Engine) -> None:
 def test_no_loads_yet(api_engine: Engine) -> None:
     """With nothing loaded, the list is empty."""
     assert client.get(URL).json() == []
+
+
+def test_running_load_shows_its_stage(api_engine: Engine) -> None:
+    """A running load comes back with its stage and how far along that stage is."""
+    with api_engine.begin() as connection:
+        connection.execute(
+            insert(LoadRun).values(
+                layer="hydro.wetlands",
+                state="TX",
+                status="running",
+                stage="unzipping",
+                progress_done=340,
+                progress_total=1200,
+            )
+        )
+
+    [load] = client.get(URL).json()
+
+    assert (load["stage"], load["progress_done"], load["progress_total"]) == (
+        "unzipping",
+        340,
+        1200,
+    )
+
+
+def test_startup_fails_interrupted_loads(api_engine: Engine) -> None:
+    """When the API starts, loads it left running are recorded as failed."""
+    add_run(api_engine, "hydro.wetlands", "TX", "running", datetime(2026, 11, 1, tzinfo=UTC))
+
+    with TestClient(app):
+        [load] = client.get(URL).json()
+
+    assert (load["status"], load["error"]) == ("failed", "The API restarted during this load.")

@@ -9,6 +9,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 from src.core.database import ReferenceBase
 
 SCHEMA = "energy"
+SCHEMA_TITLE = "Energy"
 
 
 # noinspection SpellCheckingInspection
@@ -18,7 +19,7 @@ class OilGasWell(ReferenceBase):
     __tablename__ = "oilgas_wells"
     __table_args__ = (
         Index("oilgas_wells_geom_idx", "geom", postgresql_using="gist"),
-        {"schema": SCHEMA},
+        {"schema": SCHEMA, "info": {"title": "Oil and gas wells", "group": SCHEMA_TITLE}},
     )
 
     id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
@@ -34,7 +35,7 @@ class Pipeline(ReferenceBase):
     __tablename__ = "pipelines"
     __table_args__ = (
         Index("pipelines_geom_idx", "geom", postgresql_using="gist"),
-        {"schema": SCHEMA},
+        {"schema": SCHEMA, "info": {"title": "Pipelines", "group": SCHEMA_TITLE}},
     )
 
     id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
@@ -55,7 +56,7 @@ class TransmissionLineHifld(ReferenceBase):
     __tablename__ = "transmission_lines_hifld"
     __table_args__ = (
         Index("transmission_lines_hifld_geom_idx", "geom", postgresql_using="gist"),
-        {"schema": SCHEMA},
+        {"schema": SCHEMA, "info": {"title": "Transmission lines (HIFLD)", "group": SCHEMA_TITLE}},
     )
 
     id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
@@ -74,7 +75,10 @@ class TransmissionLineOsm(ReferenceBase):
     __table_args__ = (
         UniqueConstraint("state", "osm_id"),
         Index("transmission_lines_osm_geom_idx", "geom", postgresql_using="gist"),
-        {"schema": SCHEMA},
+        {
+            "schema": SCHEMA,
+            "info": {"title": "Transmission lines (OpenStreetMap)", "group": SCHEMA_TITLE},
+        },
     )
 
     id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)

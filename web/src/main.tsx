@@ -8,6 +8,7 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 
 import { routeTree } from "@/routeTree.gen";
+import { cssVariablesResolver, theme } from "@/theme";
 
 const queryClient = new QueryClient();
 
@@ -22,7 +23,7 @@ declare module "@tanstack/react-router" {
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <QueryClientProvider client={queryClient}>
-      <MantineProvider>
+      <MantineProvider theme={theme} cssVariablesResolver={cssVariablesResolver}>
         <RouterProvider router={router} />
       </MantineProvider>
     </QueryClientProvider>

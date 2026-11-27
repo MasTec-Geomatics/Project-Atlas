@@ -1,13 +1,22 @@
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+
+import structlog
 from fastapi import APIRouter, FastAPI
 from fastapi.routing import APIRoute
 from fastapi_swagger_ui_theme import setup_swagger_ui_theme
+from sqlalchemy.exc import SQLAlchemyError
 
 from src.core.config import settings
 from src.core.logging import configure_logging
 from src.core.project import PROJECT_NAME, PROJECT_VERSION
+from src.reference.api import get_reference_engine
 from src.reference.api import router as reference_router
+from src.reference.load import fail_interrupted_runs
 
 configure_logging(settings.log_level, settings.log_json)
+
+log = structlog.get_logger(__name__)
 
 
 def generate_operation_id(route: APIRoute) -> str:
@@ -36,10 +45,34 @@ def generate_operation_id(route: APIRoute) -> str:
     return f"{route.tags[0]}-{route.name}"
 
 
+@asynccontextmanager
+async def lifespan(application: FastAPI) -> AsyncIterator[None]:
+    """Record loads left running when the API last stopped as failed, then serve.
+
+    A load runs inside the API, so one still ``running`` at startup was stopped partway.
+    The reference engine comes from the same dependency the endpoints use, so tests can
+    point it at the test database. If the reference database can't be reached, the API
+    still starts and the failure is logged.
+
+    Args:
+        application: The application being started.
+
+    Yields:
+        Nothing; the API serves requests until it stops.
+    """
+    engine = application.dependency_overrides.get(get_reference_engine, get_reference_engine)()
+    try:
+        fail_interrupted_runs(engine)
+    except SQLAlchemyError:
+        log.exception("interrupted_loads_not_checked")
+    yield
+
+
 app = FastAPI(
     title="Project Atlas",
     docs_url=None,
     generate_unique_id_function=generate_operation_id,
+    lifespan=lifespan,
 )
 setup_swagger_ui_theme(app, docs_path="/docs")
 

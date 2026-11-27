@@ -1,0 +1,73 @@
+/* Page header: dark-navy bar with white text, as the design system sets for the header. */
+.header {
+  padding: var(--space-6);
+  background-color: var(--color-dark-navy);
+  color: var(--color-white);
+}
+
+.content {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+  padding: var(--space-6);
+}
+
+.section,
+.group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+/* The brand's citron accent bar under the Load heading. */
+.accent::after {
+  content: "";
+  display: block;
+  width: 6rem;
+  height: 0.25rem;
+  margin-top: var(--space-1);
+  background-color: var(--color-citron);
+}
+
+/*
+ * Every table uses the same column widths, so the columns line up from one table to
+ * the next. The table is as wide as its columns; long layer names wrap.
+ */
+.table {
+  table-layout: fixed;
+  width: max-content;
+  background-color: var(--color-white);
+}
+
+.stateColumn {
+  width: 10rem;
+}
+
+.layerColumn {
+  width: 14rem;
+}
+
+.headRow th {
+  background-color: var(--color-lt-gray);
+  vertical-align: middle;
+}
+
+.table td {
+  vertical-align: top;
+}
+
+/* Bottom bar stays in view while scrolling through the tables. */
+.actions {
+  position: sticky;
+  bottom: 0;
+  display: flex;
+  gap: var(--space-3);
+  align-items: center;
+  padding: var(--space-3) var(--space-6);
+  border-top: 1px solid var(--color-med-lt-gray);
+  background-color: var(--color-white);
+}
+
+.selectedCount {
+  margin-right: auto;
+}

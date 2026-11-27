@@ -6,9 +6,12 @@ internet.
 """
 
 import json
+import os
+import shutil
 import threading
+import time
 import zipfile
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from functools import partial
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -20,7 +23,7 @@ from sqlalchemy import Engine, TextClause, delete, insert, text
 from src.reference import load
 from src.reference.load import LoadError, check_link, fill, plan_load, run_loads
 from src.reference.models import metadata
-from src.reference.models.public import Source
+from src.reference.models.public import LoadRun, Source
 
 
 def square(lon: float, lat: float, size: float = 0.1) -> list[list[float]]:
@@ -36,7 +39,12 @@ STATES: list[dict[str, Any]] = [
 COUNTIES: list[dict[str, Any]] = [
     {"STATEFP": "48", "GEOID": "48453", "NAME": "Travis", "ring": square(-97.8, 30.2)},
     {"STATEFP": "48", "GEOID": "48201", "NAME": "Harris", "ring": square(-95.4, 29.7)},
-    {"STATEFP": "22", "GEOID": "22033", "NAME": "East Baton Rouge", "ring": square(-91.1, 30.4)},
+    {
+        "STATEFP": "22",
+        "GEOID": "22033",
+        "NAME": "East Baton Rouge",
+        "ring": square(-91.1, 30.4),
+    },
 ]
 PLACES: list[dict[str, Any]] = [
     {"GEOID": "4805000", "NAME": "Austin", "ring": square(-97.75, 30.25)},
@@ -131,6 +139,7 @@ def server(tmp_path: Path, clean_engine: Engine) -> Iterator[tuple[Path, str]]:
     yield tmp_path, f"http://127.0.0.1:{http_server.server_port}"
     http_server.shutdown()
     http_server.server_close()
+    shutil.rmtree(load.DOWNLOADS_DIR, ignore_errors=True)
 
 
 def add_source(engine: Engine, **values: Any) -> None:
@@ -177,7 +186,7 @@ def test_national_file_keeps_only_the_state(clean_engine: Engine, server: tuple[
 
     assert rows(
         clean_engine,
-        text("SELECT state, name, GeometryType(geom), ST_SRID(geom) FROM boundaries.states"),
+        text("SELECT state, name, geometrytype(geom), st_srid(geom) FROM boundaries.states"),
     ) == [("TX", "Texas", "MULTIPOLYGON", 4326)]
 
 
@@ -196,7 +205,8 @@ def test_keep_by_fips(clean_engine: Engine, server: tuple[Path, str]) -> None:
     load_states(clean_engine, "boundaries.counties", ["TX"])
 
     assert rows(
-        clean_engine, text("SELECT state, geoid, name FROM boundaries.counties ORDER BY geoid")
+        clean_engine,
+        text("SELECT state, geoid, name FROM boundaries.counties ORDER BY geoid"),
     ) == [("TX", "48201", "Harris"), ("TX", "48453", "Travis")]
 
 
@@ -214,7 +224,8 @@ def test_link_filled_per_state(clean_engine: Engine, server: tuple[Path, str]) -
     load_states(clean_engine, "boundaries.places", ["TX"])
 
     assert rows(
-        clean_engine, text("SELECT state, geoid, name FROM boundaries.places ORDER BY geoid")
+        clean_engine,
+        text("SELECT state, geoid, name FROM boundaries.places ORDER BY geoid"),
     ) == [("TX", "4805000", "Austin"), ("TX", "4835000", "Houston")]
 
 
@@ -245,7 +256,11 @@ def test_geopackage_layer_and_keep(clean_engine: Engine, server: tuple[Path, str
     """The ``{state}`` layer inside a GeoPackage is loaded, keeping only listed values."""
     folder, base_url = server
     write_zip(
-        folder, "TX_geopackage_wetlands", WETLANDS, gdal_format="GPKG", layer_name="TX_Wetlands"
+        folder,
+        "TX_geopackage_wetlands",
+        WETLANDS,
+        gdal_format="GPKG",
+        layer_name="TX_Wetlands",
     )
     add_source(
         clean_engine,
@@ -264,7 +279,8 @@ def test_geopackage_layer_and_keep(clean_engine: Engine, server: tuple[Path, str
     load_states(clean_engine, "hydro.wetlands", ["TX"])
 
     assert rows(
-        clean_engine, text("SELECT state, cowardin_code, wetland_type FROM hydro.wetlands")
+        clean_engine,
+        text("SELECT state, cowardin_code, wetland_type FROM hydro.wetlands"),
     ) == [("TX", "PEM1C", "Freshwater Emergent Wetland")]
 
 
@@ -284,7 +300,7 @@ def test_clip_to_state(clean_engine: Engine, server: tuple[Path, str]) -> None:
 
     load_states(clean_engine, "boundaries.places", ["TX"])
 
-    [(area,)] = rows(clean_engine, text("SELECT ST_Area(geom) FROM boundaries.places"))
+    [(area,)] = rows(clean_engine, text("SELECT st_area(geom) FROM boundaries.places"))
     assert area == pytest.approx(0.25, rel=1e-3)
 
 
@@ -305,7 +321,9 @@ def test_clip_needs_the_state_outline(clean_engine: Engine, server: tuple[Path, 
 
 
 def test_one_download_for_states_sharing_a_file(
-    clean_engine: Engine, server: tuple[Path, str], monkeypatch: pytest.MonkeyPatch
+    clean_engine: Engine,
+    server: tuple[Path, str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Two states from the same national file are loaded from a single download."""
     folder, base_url = server
@@ -321,9 +339,12 @@ def test_one_download_for_states_sharing_a_file(
     downloads: list[str] = []
     real_download = load.download
 
-    def counting_download(source_url: str, work_dir: Path) -> tuple[Path, str | None]:
+    def counting_download(
+        source_url: str,
+        on_progress: load.Counted | None = None,
+    ) -> tuple[Path, str | None]:
         downloads.append(source_url)
-        return real_download(source_url, work_dir)
+        return real_download(source_url, on_progress)
 
     monkeypatch.setitem(vars(load), "download", counting_download)
 
@@ -335,7 +356,8 @@ def test_one_download_for_states_sharing_a_file(
         ("TX", "Texas"),
     ]
     assert rows(
-        clean_engine, text("SELECT state, status FROM public.load_runs ORDER BY state")
+        clean_engine,
+        text("SELECT state, status FROM public.load_runs ORDER BY state"),
     ) == [("LA", "succeeded"), ("TX", "succeeded")]
 
 
@@ -353,19 +375,24 @@ def test_failed_download_fails_every_state(clean_engine: Engine, server: tuple[P
         load_states(clean_engine, "boundaries.states", ["TX", "LA"])
 
     assert rows(
-        clean_engine, text("SELECT state, status FROM public.load_runs ORDER BY state")
+        clean_engine,
+        text("SELECT state, status FROM public.load_runs ORDER BY state"),
     ) == [("LA", "failed"), ("TX", "failed")]
 
 
 def test_renamed_field_leaves_the_table_alone(
-    clean_engine: Engine, server: tuple[Path, str]
+    clean_engine: Engine,
+    server: tuple[Path, str],
 ) -> None:
     """A mapped field missing from the source fails the load without touching the table."""
     folder, base_url = server
     add_state_outlines(clean_engine, base_url, folder, ["TX"])
     with clean_engine.begin() as connection:
         connection.execute(
-            text('UPDATE public.sources SET field_mapping = \'{"name": "FULL_NAME"}\'')
+            text(
+                'UPDATE public.sources SET field_mapping = \'{"name": "FULL_NAME"}\' '
+                "WHERE layer = 'boundaries.states'",
+            ),
         )
 
     with pytest.raises(LoadError, match="full_name"):
@@ -383,9 +410,15 @@ def test_no_source(clean_engine: Engine) -> None:
 def test_check_link_matches_fields(clean_engine: Engine, server: tuple[Path, str]) -> None:
     """Checking a link reports its layers and matches fields to the current source."""
     folder, base_url = server
-    renamed = [{"ATTRIBUTE": "PEM1C", "WETLAND_CLASS": "x", "ACRES": 1.0, "ring": square(0, 0)}]
+    renamed = [
+        {"ATTRIBUTE": "PEM1C", "WETLAND_CLASS": "x", "ACRES": 1.0, "ring": square(0, 0)},
+    ]
     write_zip(
-        folder, "TX_geopackage_wetlands", renamed, gdal_format="GPKG", layer_name="TX_Wetlands"
+        folder,
+        "TX_geopackage_wetlands",
+        renamed,
+        gdal_format="GPKG",
+        layer_name="TX_Wetlands",
     )
     add_source(
         clean_engine,
@@ -415,3 +448,329 @@ def test_check_link_matches_fields(clean_engine: Engine, server: tuple[Path, str
         "wetland_type": None,
         "acres": "ACRES",
     }
+
+
+def kept_downloads() -> list[Path]:
+    """The files in the kept downloads folder."""
+    if not load.DOWNLOADS_DIR.exists():
+        return []
+    return sorted(load.DOWNLOADS_DIR.iterdir())
+
+
+def test_load_uses_the_checked_download(clean_engine: Engine, server: tuple[Path, str]) -> None:
+    """A load uses the file Check link downloaded instead of downloading it again."""
+    folder, base_url = server
+    write_zip(folder, "tl_2026_us_state", STATES)
+    url = f"{base_url}/tl_2026_us_state.zip"
+    add_source(
+        clean_engine,
+        layer="boundaries.states",
+        download_url=url,
+        field_mapping={"name": "NAME"},
+        keep={"STUSPS": ["{state}"]},
+    )
+    check_link(clean_engine, "boundaries.states", "TX", url, "file")
+    (folder / "tl_2026_us_state.zip").unlink()
+
+    load_states(clean_engine, "boundaries.states", ["TX"])
+
+    assert rows(clean_engine, text("SELECT name FROM boundaries.states")) == [("Texas",)]
+
+
+def test_load_deletes_the_download_after_the_swap(
+    clean_engine: Engine,
+    server: tuple[Path, str],
+) -> None:
+    """Once every state is swapped in, the kept download is deleted."""
+    folder, base_url = server
+    url = f"{base_url}/tl_2026_us_state.zip"
+    write_zip(folder, "tl_2026_us_state", STATES)
+    check_link(clean_engine, "boundaries.states", "TX", url, "file")
+    assert kept_downloads()
+
+    add_state_outlines(clean_engine, base_url, folder, ["TX", "LA"])
+
+    assert kept_downloads() == []
+
+
+def test_failed_swap_keeps_the_download(clean_engine: Engine, server: tuple[Path, str]) -> None:
+    """A failed swap keeps the download, and the next load uses it."""
+    folder, base_url = server
+    write_zip(folder, "tl_2026_us_state", STATES)
+    add_source(
+        clean_engine,
+        layer="boundaries.states",
+        download_url=f"{base_url}/tl_2026_us_state.zip",
+        field_mapping={"name": "FULL_NAME"},
+        keep={"STUSPS": ["{state}"]},
+    )
+    with pytest.raises(LoadError, match="full_name"):
+        load_states(clean_engine, "boundaries.states", ["TX"])
+    assert kept_downloads()
+
+    (folder / "tl_2026_us_state.zip").unlink()
+    with clean_engine.begin() as connection:
+        connection.execute(
+            text(
+                'UPDATE public.sources SET field_mapping = \'{"name": "NAME"}\' '
+                "WHERE layer = 'boundaries.states'",
+            ),
+        )
+    load_states(clean_engine, "boundaries.states", ["TX"])
+
+    assert rows(clean_engine, text("SELECT name FROM boundaries.states")) == [("Texas",)]
+    assert kept_downloads() == []
+
+
+def current_run(engine: Engine) -> list[tuple[object, ...]]:
+    """The status, stage, and stage progress of every ``public.load_runs`` row."""
+    return rows(
+        engine,
+        text("SELECT status, stage, progress_done, progress_total FROM public.load_runs"),
+    )
+
+
+def unzipped_size(archive: Path) -> int:
+    """The total size of the files inside a zip, once unzipped."""
+    with zipfile.ZipFile(archive) as opened:
+        return sum(member.file_size for member in opened.infolist())
+
+
+def stage_order(stages: Sequence[object]) -> list[object]:
+    """The stages in the order they came, each listed once per run of repeats."""
+    return [stage for index, stage in enumerate(stages) if index == 0 or stages[index - 1] != stage]
+
+
+def test_load_records_each_stage(
+    clean_engine: Engine,
+    server: tuple[Path, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A running load records each stage in turn, with how far along it is.
+
+    Downloading and unzipping count bytes, copying counts percent, and swapping has no
+    count. The progress is cleared when the load ends.
+    """
+    folder, base_url = server
+    write_zip(folder, "tl_2026_us_state", STATES)
+    archive = folder / "tl_2026_us_state.zip"
+    size = archive.stat().st_size
+    unzipped = unzipped_size(archive)
+    add_source(
+        clean_engine,
+        layer="boundaries.states",
+        download_url=f"{base_url}/tl_2026_us_state.zip",
+        field_mapping={"name": "NAME"},
+        keep={"STUSPS": ["{state}"]},
+    )
+    seen: list[tuple[object, ...]] = []
+
+    def watch(recorder: str) -> Any:
+        """Wrap a recorder so the load's row is read back each time it's written."""
+        recorder_function = vars(load)[recorder]
+
+        def watching(*args: Any) -> None:
+            recorder_function(*args)
+            seen.extend(current_run(clean_engine))
+
+        return watching
+
+    for recorder_name in ("set_stage", "record_progress"):
+        monkeypatch.setitem(vars(load), recorder_name, watch(recorder_name))
+
+    load_states(clean_engine, "boundaries.states", ["TX"])
+
+    assert stage_order([row[1] for row in seen]) == [
+        "downloading",
+        "unzipping",
+        "copying",
+        "swapping",
+    ]
+    last = {row[1]: row for row in seen}
+    assert last["downloading"] == ("running", "downloading", size, size)
+    assert last["unzipping"] == ("running", "unzipping", unzipped, unzipped)
+    assert last["copying"] == ("running", "copying", 100, 100)
+    assert last["swapping"] == ("running", "swapping", None, None)
+    assert current_run(clean_engine) == [("succeeded", None, None, None)]
+
+
+def test_unzip_refuses_a_path_outside_its_folder(
+    clean_engine: Engine,
+    server: tuple[Path, str],
+) -> None:
+    """A zip holding a path that climbs out of the unzip folder fails the load."""
+    folder, base_url = server
+    with zipfile.ZipFile(folder / "climbing.zip", "w") as archive:
+        archive.writestr("../outside.shp", "x")
+    add_source(
+        clean_engine,
+        layer="boundaries.states",
+        download_url=f"{base_url}/climbing.zip",
+        field_mapping={"name": "NAME"},
+    )
+
+    with pytest.raises(LoadError, match=r"outside\.shp"):
+        load_states(clean_engine, "boundaries.states", ["TX"])
+
+
+def test_clipped_load_stages_only_the_state_area(
+    clean_engine: Engine,
+    server: tuple[Path, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A load cut at the state line stages only what's inside the state's rectangle."""
+    folder, base_url = server
+    add_state_outlines(clean_engine, base_url, folder, ["TX"])
+    write_zip(folder, "tl_2026_48_place", PLACES)
+    add_source(
+        clean_engine,
+        layer="boundaries.places",
+        download_url=f"{base_url}/tl_2026_{{fips}}_place.zip",
+        field_mapping={"geoid": "GEOID", "name": "NAME"},
+        clip_to_state=True,
+    )
+    commands: list[list[str]] = []
+    real_run_gdal = load.run_gdal
+
+    def recording_run_gdal(
+        tool: str,
+        arguments: list[str],
+        *,
+        password: str | None = None,
+        on_progress: load.Counted | None = None,
+    ) -> str:
+        commands.append(arguments)
+        return real_run_gdal(tool, arguments, password=password, on_progress=on_progress)
+
+    monkeypatch.setitem(vars(load), "run_gdal", recording_run_gdal)
+
+    load_states(clean_engine, "boundaries.places", ["TX"])
+
+    [staging_command] = commands
+    spat = staging_command.index("-spat")
+    assert [float(value) for value in staging_command[spat + 1 : spat + 5]] == pytest.approx(
+        [-98.0, 31.0, -97.0, 32.0],
+        abs=1e-3,
+    )
+    assert staging_command[spat + 5 : spat + 7] == ["-spat_srs", "EPSG:4326"]
+
+
+def test_restart_fails_interrupted_loads(clean_engine: Engine) -> None:
+    """Loads left running when the API stopped are recorded as failed."""
+    with clean_engine.begin() as connection:
+        connection.execute(
+            insert(LoadRun).values(
+                layer="hydro.wetlands",
+                state="TX",
+                status="running",
+                stage="downloading",
+            ),
+        )
+
+    load.fail_interrupted_runs(clean_engine)
+
+    assert rows(
+        clean_engine,
+        text("SELECT status, stage, error, finished_at IS NOT NULL FROM public.load_runs"),
+    ) == [("failed", None, "The API restarted during this load.", True)]
+
+
+def test_check_link_reports_its_progress(clean_engine: Engine, server: tuple[Path, str]) -> None:
+    """Checking a link reports the download, then the unzip, then reading the fields."""
+    folder, base_url = server
+    write_zip(folder, "tl_2026_us_state", STATES)
+    archive = folder / "tl_2026_us_state.zip"
+    size = archive.stat().st_size
+    unzipped = unzipped_size(archive)
+    progress: list[tuple[str, int | None, int | None]] = []
+
+    def report(stage: str, done: int | None, total: int | None) -> None:
+        progress.append((stage, done, total))
+
+    check_link(
+        clean_engine,
+        "boundaries.states",
+        "TX",
+        f"{base_url}/tl_2026_us_state.zip",
+        "file",
+        progress=report,
+    )
+
+    assert stage_order([stage for stage, _, _ in progress]) == [
+        "downloading",
+        "unzipping",
+        "reading",
+    ]
+    last = {stage: (done, total) for stage, done, total in progress}
+    assert last == {
+        "downloading": (size, size),
+        "unzipping": (unzipped, unzipped),
+        "reading": (None, None),
+    }
+
+
+def source_checks(engine: Engine) -> list[tuple[object, ...]]:
+    """The layer, state, result, and error of every ``public.source_checks`` row."""
+    return rows(
+        engine,
+        text(
+            "SELECT layer, state, update_available, error FROM public.source_checks "
+            "ORDER BY checked_at, id",
+        ),
+    )
+
+
+def test_source_check_finds_a_newer_file(clean_engine: Engine, server: tuple[Path, str]) -> None:
+    """A source whose file changed since the last load is marked as having an update."""
+    folder, base_url = server
+    add_state_outlines(clean_engine, base_url, folder, ["TX"])
+
+    load.check_sources(clean_engine)
+    later = time.time() + 3600
+    os.utime(folder / "tl_2026_us_state.zip", (later, later))
+    load.check_sources(clean_engine)
+
+    assert source_checks(clean_engine) == [
+        ("boundaries.states", "TX", False, None),
+        ("boundaries.states", "TX", True, None),
+    ]
+
+
+def test_source_check_reports_each_source(clean_engine: Engine, server: tuple[Path, str]) -> None:
+    """A change check reports each layer and state before asking its source.
+
+    The two states share one national file, so the file is asked once, but each state is
+    still reported and recorded.
+    """
+    folder, base_url = server
+    add_state_outlines(clean_engine, base_url, folder, ["LA", "TX"])
+    progress: list[tuple[int, int, str, str]] = []
+
+    def report(checked: int, total: int, layer: str, state: str) -> None:
+        progress.append((checked, total, layer, state))
+
+    count = load.check_sources(clean_engine, progress=report)
+
+    assert count == 2
+    assert progress == [
+        (0, 2, "boundaries.states", "LA"),
+        (1, 2, "boundaries.states", "TX"),
+    ]
+    assert len(source_checks(clean_engine)) == 2
+
+
+def test_source_check_records_an_unreachable_source(
+    clean_engine: Engine,
+    server: tuple[Path, str],
+) -> None:
+    """A source that can't be reached is recorded with the reason."""
+    folder, base_url = server
+    add_state_outlines(clean_engine, base_url, folder, ["TX"])
+    (folder / "tl_2026_us_state.zip").unlink()
+
+    load.check_sources(clean_engine)
+
+    [(layer, state, update_available, error)] = source_checks(clean_engine)
+    assert (layer, state, update_available) == ("boundaries.states", "TX", False)
+    assert isinstance(error, str)
+    assert "404" in error
