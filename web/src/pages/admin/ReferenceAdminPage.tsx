@@ -25,8 +25,12 @@ import {
   useReferenceListStates,
   useReferenceStartLoads,
 } from "@/api/generated";
+import { DateSettingsMenu } from "@/dates/DateSettingsMenu";
+import { useDateSettings } from "@/dates/dateSettings";
+import { formatDate } from "@/dates/formatDate";
 
 import classes from "./ReferenceAdminPage.module.css";
+import { downloadPercent, downloadText } from "./formatBytes";
 
 /** How often the page asks for load status while a load is waiting or running. */
 const LOAD_STATUS_INTERVAL_MS = 3000;
@@ -86,13 +90,46 @@ function errorMessages(error: unknown): string[] {
   return [error instanceof Error ? error.message : String(error)];
 }
 
+/**
+ * When a box was last loaded, for a box with nothing running: `Updated 3 days ago`,
+ * `Failed 2026-11-12 09:14` when its newest load failed, or `Never loaded`.
+ */
+function LastUpdated({ load }: { load: LoadRead | undefined }) {
+  const dateSettings = useDateSettings();
+  if (load === undefined || load.finished_at === null) {
+    return <Text size="xs">Never loaded</Text>;
+  }
+  const when = formatDate(load.finished_at, dateSettings);
+  return <Text size="xs">{`${load.status === "failed" ? "Failed" : "Updated"} ${when}`}</Text>;
+}
+
 interface LoadStatusProps {
   load: BoxState;
   label: string;
 }
 
+/** What a running load is doing, by its stage. */
+const STAGE_TEXT: Record<string, string> = {
+  copying: "Copying data",
+  swapping: "Swapping data",
+};
+
 /**
- * One box's load: waiting, a moving bar while running, then the result.
+ * What a running load is doing, such as `Downloading: 340.0 MB of 1.2 GB`, or `null`
+ * before it reports a stage.
+ */
+function runningText(load: LoadRead): string | null {
+  if (load.stage === "downloading") {
+    return downloadText(load.bytes_downloaded, load.bytes_total);
+  }
+  return load.stage === null ? null : (STAGE_TEXT[load.stage] ?? null);
+}
+
+/**
+ * One box's load: waiting, a bar and what it's doing while running, then the result.
+ *
+ * While downloading a file of known size, the bar fills as the file arrives. Otherwise
+ * it stays full and moving.
  */
 function LoadStatus({ load, label }: LoadStatusProps) {
   if (load === undefined) return null;
@@ -106,7 +143,17 @@ function LoadStatus({ load, label }: LoadStatusProps) {
   }
 
   if (load.status === "running") {
-    return <Progress value={100} striped animated aria-label={`${label} running`} />;
+    const percent =
+      load.stage === "downloading"
+        ? downloadPercent(load.bytes_downloaded, load.bytes_total)
+        : null;
+    const text = runningText(load);
+    return (
+      <Stack gap={4}>
+        <Progress value={percent ?? 100} striped animated aria-label={`${label} running`} />
+        {text !== null && <Text size="xs">{text}</Text>}
+      </Stack>
+    );
   }
 
   if (load.status === "succeeded") {
@@ -382,9 +429,12 @@ export function ReferenceAdminPage() {
             <Title order={2} className={classes.accent}>
               Load
             </Title>
-            <Anchor component={Link} to="/admin/reference/sources">
-              Sources
-            </Anchor>
+            <Group>
+              <Anchor component={Link} to="/admin/reference/sources">
+                Sources
+              </Anchor>
+              <DateSettingsMenu />
+            </Group>
           </Group>
 
           <Group align="end">
@@ -487,6 +537,8 @@ export function ReferenceAdminPage() {
                                       ])}
                                       label={label}
                                     />
+                                  ) : boxState(key) === undefined ? (
+                                    <LastUpdated load={loadsByBox.get(key)} />
                                   ) : (
                                     <LoadStatus load={boxState(key)} label={label} />
                                   )}

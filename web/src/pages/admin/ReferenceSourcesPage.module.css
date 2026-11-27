@@ -84,14 +84,10 @@
   white-space: nowrap;
 }
 
-/* Read by screen readers but not shown, for the Edit column's heading. */
-.hidden {
-  position: absolute;
-  overflow: hidden;
-  width: 1px;
-  height: 1px;
-  clip-path: inset(50%);
-  white-space: nowrap;
+/* The updates table is as wide as its contents. */
+.updates {
+  width: auto;
+  background-color: var(--color-white);
 }
 
 /* The form's column-to-field table fills the panel. */

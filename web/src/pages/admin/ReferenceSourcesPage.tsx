@@ -5,6 +5,7 @@ import {
   Checkbox,
   Drawer,
   Group,
+  Progress,
   Radio,
   Select,
   Stack,
@@ -12,23 +13,31 @@ import {
   Text,
   TextInput,
   Title,
+  VisuallyHidden,
 } from "@mantine/core";
 import { useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
+import { checkSource } from "@/api/checkSource";
 import { ApiError } from "@/api/fetcher";
-import type { LayerRead, SourceRead, StateRead } from "@/api/generated";
+import type { CheckEvent, LayerRead, SourceRead, StateRead } from "@/api/generated";
 import {
+  getReferenceListSourceChecksQueryKey,
   getReferenceListSourcesQueryKey,
-  useReferenceCheckSource,
   useReferenceCreateSource,
   useReferenceListLayers,
+  useReferenceListSourceChecks,
   useReferenceListSources,
   useReferenceListStates,
+  useReferenceRunSourceChecks,
   useReferenceUpdateSource,
 } from "@/api/generated";
+import { DateSettingsMenu } from "@/dates/DateSettingsMenu";
+import { useDateSettings } from "@/dates/dateSettings";
+import { formatDate } from "@/dates/formatDate";
 
+import { downloadPercent, downloadText } from "./formatBytes";
 import classes from "./ReferenceSourcesPage.module.css";
 
 /** The State option for a source that covers every state. */
@@ -109,6 +118,19 @@ function errorMessage(error: unknown): string {
 }
 
 /**
+ * What a running link check is doing: opening the link, downloading, or reading fields.
+ */
+function checkText(event: CheckEvent | null): string {
+  if (event?.stage === "downloading") {
+    return downloadText(event.bytes_downloaded ?? null, event.bytes_total ?? null);
+  }
+  if (event?.stage === "reading") {
+    return "Reading fields";
+  }
+  return "Opening the link";
+}
+
+/**
  * The picked fields, leaving out columns with no field picked.
  */
 function fieldMapping(columns: Record<string, string | null>): Record<string, string> {
@@ -150,13 +172,21 @@ interface SourceFormProps {
  * The Add source and Edit source form.
  *
  * Check link opens the link and fills in the format, the dataset layer, and the field
- * for each column it could match. Save stays off until the link is checked, and again
- * after the layer, state, link, or type changes.
+ * for each column it could match. While it runs, a bar shows the download's progress,
+ * then reading the fields. The load uses the file Check link downloaded. Save stays off
+ * until the link is checked, and again after the layer, state, link, or type changes.
  */
 function SourceForm({ editing, layers, states, onSaved }: SourceFormProps) {
   const [form, setForm] = useState<FormValues>(editing ? formFromSource(editing) : EMPTY_FORM);
 
-  const check = useReferenceCheckSource();
+  // The running check's latest progress, whether a check is running, and why the last
+  // one failed. Changing the link stops a running check.
+  const [checkProgress, setCheckProgress] = useState<CheckEvent | null>(null);
+  const [checking, setChecking] = useState(false);
+  const [checkError, setCheckError] = useState<string | null>(null);
+  const checkAbort = useRef<AbortController | null>(null);
+  useEffect(() => () => checkAbort.current?.abort(), []);
+
   const create = useReferenceCreateSource({ mutation: { onSuccess: onSaved } });
   const update = useReferenceUpdateSource({ mutation: { onSuccess: onSaved } });
   const save = editing ? update : create;
@@ -168,7 +198,9 @@ function SourceForm({ editing, layers, states, onSaved }: SourceFormProps) {
    * Change fields that decide what the link holds. The last check no longer applies.
    */
   function changeLink(values: Partial<FormValues>) {
-    check.reset();
+    checkAbort.current?.abort();
+    setChecking(false);
+    setCheckError(null);
     setForm({
       ...form,
       ...values,
@@ -179,31 +211,44 @@ function SourceForm({ editing, layers, states, onSaved }: SourceFormProps) {
     });
   }
 
-  function runCheck() {
+  async function runCheck() {
     if (form.layer === null || stateToCheck === null) return;
-    check.mutate(
-      {
-        data: {
+    const abort = new AbortController();
+    checkAbort.current = abort;
+    setChecking(true);
+    setCheckProgress(null);
+    setCheckError(null);
+    try {
+      await checkSource(
+        {
           layer: form.layer,
           state: stateToCheck,
           download_url: form.downloadUrl,
           access_type: form.accessType,
         },
-      },
-      {
-        onSuccess: (response) => {
-          if (response.status !== 200) return;
-          const { data } = response;
-          setForm({
-            ...form,
-            format: data.format,
-            sourceLayer: data.source_layer,
-            datasetLayers: data.layers,
-            columns: data.field_mapping,
-          });
+        (event) => {
+          if (event.stage === "done" && event.result) {
+            const result = event.result;
+            setForm((current) => ({
+              ...current,
+              format: result.format,
+              sourceLayer: result.source_layer,
+              datasetLayers: result.layers,
+              columns: result.field_mapping,
+            }));
+          } else if (event.stage === "failed") {
+            setCheckError(event.error ?? "The link couldn't be checked.");
+          } else {
+            setCheckProgress(event);
+          }
         },
-      },
-    );
+        abort.signal,
+      );
+    } catch (error) {
+      if (abort.signal.aborted) return;
+      setCheckError(errorMessage(error));
+    }
+    setChecking(false);
   }
 
   /**
@@ -312,17 +357,37 @@ function SourceForm({ editing, layers, states, onSaved }: SourceFormProps) {
       <Group>
         <Button
           variant="default"
-          onClick={runCheck}
-          loading={check.isPending}
-          disabled={form.layer === null || stateToCheck === null || form.downloadUrl === ""}
+          onClick={() => void runCheck()}
+          disabled={
+            checking || form.layer === null || stateToCheck === null || form.downloadUrl === ""
+          }
         >
           Check link
         </Button>
       </Group>
 
-      {check.isError && (
+      {checking && (
+        <Stack gap={4}>
+          <Progress
+            value={
+              checkProgress?.stage === "downloading"
+                ? (downloadPercent(
+                    checkProgress.bytes_downloaded ?? null,
+                    checkProgress.bytes_total ?? null,
+                  ) ?? 100)
+                : 100
+            }
+            striped
+            animated
+            aria-label="Check link progress"
+          />
+          <Text size="sm">{checkText(checkProgress)}</Text>
+        </Stack>
+      )}
+
+      {checkError !== null && (
         <Alert color="var(--color-rust)" title="The link couldn't be checked">
-          {errorMessage(check.error)}
+          {checkError}
         </Alert>
       )}
 
@@ -437,10 +502,21 @@ export function ReferenceSourcesPage() {
   const sources = useReferenceListSources();
   const layers = useReferenceListLayers();
   const states = useReferenceListStates();
+  const checks = useReferenceListSourceChecks();
+  const runChecks = useReferenceRunSourceChecks({
+    mutation: {
+      onSuccess: () =>
+        queryClient.invalidateQueries({ queryKey: getReferenceListSourceChecksQueryKey() }),
+    },
+  });
 
   const allSources = sources.data?.data ?? [];
   const allLayers = layers.data?.data ?? [];
   const allStates = states.data?.data ?? [];
+  const lastCheck = checks.data?.data;
+  const dateSettings = useDateSettings();
+  const layerTitle = (name: string) =>
+    allLayers.find((layer) => layer.name === name)?.title ?? name;
 
   async function saved() {
     setEditing(null);
@@ -463,8 +539,74 @@ export function ReferenceSourcesPage() {
               Load layers
             </Anchor>
             <Button onClick={() => setEditing("new")}>Add source</Button>
+            <DateSettingsMenu />
           </Group>
         </Group>
+
+        <section className={classes.group}>
+          <Group justify="space-between" align="center">
+            <Title order={3}>Updates</Title>
+            <Button
+              variant="default"
+              onClick={() => runChecks.mutate()}
+              loading={runChecks.isPending}
+            >
+              Check for updates
+            </Button>
+          </Group>
+          {lastCheck && (
+            <Text size="sm">
+              {lastCheck.checked_at === null
+                ? "Not checked for updates yet"
+                : `Last checked ${formatDate(lastCheck.checked_at, dateSettings)}`}
+            </Text>
+          )}
+          {runChecks.isError && (
+            <Alert color="var(--color-rust)" title="The check didn't run">
+              {errorMessage(runChecks.error)}
+            </Alert>
+          )}
+          {lastCheck?.checked_at && lastCheck.updates.length === 0 && (
+            <Text>Every loaded layer is up to date.</Text>
+          )}
+          {lastCheck && lastCheck.updates.length > 0 && (
+            <Table.ScrollContainer minWidth={0} type="native">
+              <Table
+                withTableBorder
+                withColumnBorders
+                className={classes.updates}
+                aria-label="Updates"
+              >
+                <Table.Thead>
+                  <Table.Tr className={classes.headRow}>
+                    <Table.Th>Layer</Table.Th>
+                    <Table.Th>State</Table.Th>
+                    <Table.Th>Last loaded</Table.Th>
+                    <Table.Th>Update</Table.Th>
+                  </Table.Tr>
+                </Table.Thead>
+                <Table.Tbody>
+                  {lastCheck.updates.map((update) => (
+                    <Table.Tr key={`${update.layer}|${update.state}`}>
+                      <Table.Th scope="row">{layerTitle(update.layer)}</Table.Th>
+                      <Table.Td>{update.state}</Table.Td>
+                      <Table.Td>
+                        {update.last_pulled === null
+                          ? "Never"
+                          : formatDate(update.last_pulled, dateSettings)}
+                      </Table.Td>
+                      <Table.Td>
+                        {update.error === null
+                          ? "Newer file available"
+                          : `Couldn't check: ${update.error}`}
+                      </Table.Td>
+                    </Table.Tr>
+                  ))}
+                </Table.Tbody>
+              </Table>
+            </Table.ScrollContainer>
+          )}
+        </section>
 
         {sources.isSuccess && allSources.length === 0 && <Text>No sources yet.</Text>}
 
@@ -489,7 +631,7 @@ export function ReferenceSourcesPage() {
                     <Table.Th>Format</Table.Th>
                     <Table.Th>Enabled</Table.Th>
                     <Table.Th>
-                      <span className={classes.hidden}>Edit</span>
+                      <VisuallyHidden>Edit</VisuallyHidden>
                     </Table.Th>
                   </Table.Tr>
                 </Table.Thead>
